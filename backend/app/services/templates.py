@@ -239,6 +239,9 @@ def fill_template(doc: dict[str, Any], values: dict[str, str], images: dict[str,
 
     for layer in out["layers"]:
         layer["id"] = _id()
+        # Remember the placeholder version so the design can be re-filled for another product later.
+        if isinstance(layer.get("text"), str) and _PH.search(layer["text"]) and "template_text" not in layer:
+            layer["template_text"] = layer["text"]
         for key in ("text", "fill", "stroke", "fontFamily"):
             if isinstance(layer.get(key), str):
                 layer[key] = sub(layer[key])

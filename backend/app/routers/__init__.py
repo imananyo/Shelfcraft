@@ -1,3 +1,4 @@
+from app import auth, public_api
 from app.routers import (
     aplus,
     assets,
@@ -5,6 +6,8 @@ from app.routers import (
     creative,
     editor,
     factory,
+    growth,
+    integrations,
     jobs,
     listings,
     products,
@@ -15,9 +18,12 @@ from app.routers import (
 
 ROUTERS = [
     system.router,
+    auth.router,
     brands.router,
+    integrations.router,  # before products: /products/import-text must not be captured by /products/{id}
     products.router,
     assets.router,
+    growth.router,  # before listings/videos: /listings/bulk and /videos/spin are static paths
     listings.router,
     creative.router,
     editor.router,
@@ -26,4 +32,5 @@ ROUTERS = [
     videos.router,
     jobs.router,
     providers.router,
+    public_api.manage,
 ]

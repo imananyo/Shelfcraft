@@ -24,7 +24,7 @@ log = logging.getLogger("shelfcraft")
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ANN201
     from app.bootstrap import bootstrap
-    from app.jobs import handlers  # noqa: F401 - registers job handlers
+    from app.jobs import handlers, handlers_extra  # noqa: F401 - registers job handlers
     from app.jobs.queue import start_workers, stop_workers
 
     bootstrap()
@@ -56,10 +56,16 @@ def create_app(*, start_workers: bool = True) -> FastAPI:
     async def access_guard(request: Request, call_next):  # noqa: ANN001, ANN202
         token = get_settings().access_token
         path = request.url.path
-        if token and path.startswith("/api") and path != "/api/health":
-            supplied = request.headers.get("x-shelfcraft-token") or request.cookies.get("shelfcraft_token") or ""
-            if not secrets.compare_digest(supplied, token):
-                return JSONResponse({"detail": "Access token required"}, status_code=401)
+        supplied = request.headers.get("x-shelfcraft-token") or request.cookies.get("shelfcraft_token") or ""
+        token_ok = bool(token) and secrets.compare_digest(supplied, token)
+        if token and path.startswith("/api") and path != "/api/health" and not token_ok:
+            return JSONResponse({"detail": "Access token required"}, status_code=401)
+        if path.startswith("/api") and not token_ok:
+            from app.auth import check_request
+
+            allowed, message, status = check_request(request)
+            if not allowed:
+                return JSONResponse({"detail": message, "code": "auth_required" if status == 401 else "forbidden"}, status_code=status)
         t0 = time.perf_counter()
         response = await call_next(request)
         if path.startswith("/api") and not path.endswith(("/file", "/thumb")):
@@ -108,10 +114,13 @@ def _register_error_handlers(app: FastAPI) -> None:
 
 
 def _register_routers(app: FastAPI) -> None:
+    from app.public_api import build_public_app
     from app.routers import ROUTERS
 
     for router in ROUTERS:
         app.include_router(router, prefix="/api")
+    # Public, API-key authenticated API with its own docs at /v1/docs (the local /api is unchanged).
+    app.mount("/v1", build_public_app())
 
 
 app = create_app()

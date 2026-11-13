@@ -400,6 +400,57 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
+class Playbook(Base, TimestampMixin, SoftDeleteMixin):
+    """A reusable recipe of generation steps (e.g. 'Amazon main images' = white main + hero + 3 infographics)."""
+
+    __tablename__ = "playbooks"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(40), default="custom")
+    steps: Mapped[list[Any]] = mapped_column(default=list)  # [{"kind": "creative", "creative_type": "...", ...}]
+    settings: Mapped[dict[str, Any]] = mapped_column(default=dict)  # style, prompt, size, marketplace...
+    is_template: Mapped[bool] = mapped_column(Boolean, default=False)  # built-in library entry
+
+
+class ApiKey(Base, TimestampMixin):
+    """Public API key. Only a SHA-256 hash is stored; the full key is shown once at creation."""
+
+    __tablename__ = "api_keys"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120))
+    prefix: Mapped[str] = mapped_column(String(20), index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    scopes: Mapped[list[Any]] = mapped_column(default=list)  # ["read", "write"]
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Member(Base, TimestampMixin):
+    """Workspace member for team mode. Passwords hashed with scrypt; invites use one-time tokens."""
+
+    __tablename__ = "members"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    role: Mapped[str] = mapped_column(String(20), default="editor")  # owner | admin | editor | viewer
+    password_hash: Mapped[str | None] = mapped_column(String(300))
+    invite_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    invite_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="invited")  # invited | active | disabled
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LoginSession(Base):
+    __tablename__ = "login_sessions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)

@@ -41,8 +41,11 @@ class FactoryIn(BaseModel):
     dry_run: bool = False
 
 
+EXTRA_TYPES = {"listing_copy"}  # bulk listing copy (title, bullets, description) per product
+
+
 def _plan(db: Session, body: FactoryIn) -> list[dict[str, Any]]:
-    bad = [t for t in body.creative_types if t not in CREATIVE_TYPES]
+    bad = [t for t in body.creative_types if t not in CREATIVE_TYPES and t not in EXTRA_TYPES]
     if bad:
         raise HTTPException(422, f"unknown creative types: {', '.join(bad)}")
     items = []
@@ -62,7 +65,7 @@ def _plan(db: Session, body: FactoryIn) -> list[dict[str, Any]]:
 @router.post("/preview")
 def preview(body: FactoryIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     items = _plan(db, body)
-    secs = sum(SECONDS_ESTIMATE[CREATIVE_TYPES[i["creative_type"]]["mode"]] for i in items)
+    secs = sum(120 if i["creative_type"] == "listing_copy" else SECONDS_ESTIMATE[CREATIVE_TYPES[i["creative_type"]]["mode"]] for i in items)
     limit = get_settings().max_jobs_per_batch
     warnings = []
     if len(items) > limit:

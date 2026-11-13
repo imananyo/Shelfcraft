@@ -17,7 +17,7 @@ from app.imaging.render import render_document
 from app.routers.common import get_or_404, soft_delete
 from app.routers.editor import doc_summary
 from app.services.documents import create_document, document_json
-from app.services.templates import IMG, R, T, builtin_document, default_values, fill_template
+from app.services.templates import IMG, E, R, T, builtin_document, default_values, fill_template
 
 router = APIRouter(prefix="/aplus", tags=["aplus"])
 
@@ -29,6 +29,9 @@ MODULE_TYPES: dict[str, dict[str, Any]] = {
     "comparison": {"label": "Comparison table", "basic": [970, 600], "premium": [1464, 800], "mobile": [600, 700]},
     "lifestyle": {"label": "Lifestyle image + text", "basic": [970, 600], "premium": [1464, 600], "mobile": [600, 450]},
     "detail": {"label": "Product detail close-up", "basic": [970, 600], "premium": [1464, 600], "mobile": [600, 450]},
+    # One continuous design, exported as consecutive slices so the modules join without seams.
+    "seamless": {"label": "Seamless story (one continuous image)", "basic": [970, 1800], "premium": [1464, 1800],
+                 "mobile": [600, 1350], "slice": {"basic": 600, "premium": 600, "mobile": 450}},
 }
 DIMENSION_NOTE = "Sizes are commonly documented A+ module sizes. Verify in Amazon's A+ Content Manager before upload."
 
@@ -58,6 +61,24 @@ def _module_doc(kind: str, w: int, h: int) -> dict[str, Any]:
                 layer["points"] = [v * (sx if i % 2 == 0 else sy) for i, v in enumerate(layer["points"])]
         base["width"], base["height"] = w, h
         return base
+    if kind == "seamless":
+        band = h / 3
+        layers: list[dict[str, Any]] = [
+            IMG("Continuous scene", 0, 0, w, h, "background", fit="cover"),
+            R("Top wash", 0, 0, w, band * 0.9, "{{paper}}", opacity=0.82),
+            T("Headline", w * 0.06, band * 0.22, w * 0.6, "{{headline}}", int(band * 0.12), bold=True, font="{{font_display}}", h=band * 0.3, line_height=1.08),
+            T("Subheadline", w * 0.06, band * 0.58, w * 0.55, "{{subheadline}}", int(band * 0.05), h=band * 0.25, line_height=1.35),
+            IMG("Product", w * 0.58, band * 0.55, w * 0.38, band * 1.1, "product_cutout"),
+            R("Feature band", 0, band * 1.75, w, band * 0.85, "{{paper}}", opacity=0.9),
+        ]
+        for i in range(3):
+            x = w * (0.06 + i * 0.31)
+            layers += [E(f"Feature {i + 1} dot", x, band * 1.88, band * 0.09, band * 0.09, "{{primary}}"),
+                       T(f"Feature {i + 1}", x, band * 2.02, w * 0.27, f"{{{{feature_{i + 1}}}}}", int(band * 0.055), bold=True, h=band * 0.16),
+                       T(f"Benefit {i + 1}", x, band * 2.2, w * 0.27, f"{{{{benefit_{i + 1}}}}}", int(band * 0.04), h=band * 0.3, line_height=1.35)]
+        layers.append(T("Sign-off", w * 0.06, band * 2.7, w * 0.88, "{{brand_name}}", int(band * 0.07), bold=True, align="center",
+                        font="{{font_display}}", fill="#ffffff"))
+        return {"width": w, "height": h, "background": "#ffffff", "layers": layers}
     if kind == "detail":
         return {"width": w, "height": h, "background": "#ffffff", "layers": [
             IMG("Detail image", 0, 0, w * 0.6, h, "product_image", fit="cover"),
@@ -223,11 +244,23 @@ def export_zip(project_id: str, db: Session = Depends(get_db)) -> StreamingRespo
                 continue
             doc = document_json(d)
             im = render_document(doc).convert("RGB")
+            texts = [layer.get("text") for layer in doc["layers"] if layer["type"] == "text" and layer.get("visible", True)]
+            if m["type"] == "seamless":
+                # Slice the continuous design into consecutive modules (uploaded in order, they join seamlessly).
+                step = MODULE_TYPES["seamless"]["slice"].get((p.data or {}).get("tier", "premium"), 600)
+                for k, top in enumerate(range(0, im.height, step)):
+                    part = im.crop((0, top, im.width, min(im.height, top + step)))
+                    b = io.BytesIO()
+                    part.save(b, "JPEG", quality=92, optimize=True)
+                    fname = f"{i:02d}{chr(97 + k)}-seamless-{part.width}x{part.height}.jpg"
+                    z.writestr(fname, b.getvalue())
+                    manifest.append({"order": f"{i}{chr(97 + k)}", "module": "seamless slice", "file": fname, "size": [part.width, part.height],
+                                     "bytes": len(b.getvalue()), "text": [t for t in texts if t] if k == 0 else []})
+                continue
             b = io.BytesIO()
             im.save(b, "JPEG", quality=92, optimize=True)
             fname = f"{i:02d}-{m['type']}-{im.width}x{im.height}.jpg"
             z.writestr(fname, b.getvalue())
-            texts = [layer.get("text") for layer in doc["layers"] if layer["type"] == "text" and layer.get("visible", True)]
             manifest.append({"order": i, "module": m["type"], "file": fname, "size": [im.width, im.height],
                              "bytes": len(b.getvalue()), "text": [t for t in texts if t]})
         z.writestr("modules.json", json.dumps({"project": p.name, "tier": (p.data or {}).get("tier"),

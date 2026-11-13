@@ -54,7 +54,7 @@ def marketplaces() -> dict[str, Any]:
 class ListingIn(BaseModel):
     product_id: str
     brand_id: str | None = None
-    marketplace: str = Field(default="amazon", pattern="^(amazon|shopify|walmart|tiktok)$")
+    marketplace: str = Field(default="amazon", pattern="^(amazon|amazon_mobile|shopify|walmart|tiktok)$")
     country: str = Field(default="US", max_length=8)
     language: str = Field(default="en", max_length=16)
     audience: str | None = Field(default=None, max_length=1000)

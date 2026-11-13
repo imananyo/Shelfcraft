@@ -88,7 +88,7 @@ def _overlay(frame: Image.Image, text: str, position: str, style: dict[str, Any]
 
 def render_video(scenes: list[dict[str, Any]], *, aspect: str, transition: str, transition_s: float,
                  music: Asset | None, assets: dict[str, Asset], text_style: dict[str, Any],
-                 progress: Any = None) -> tuple[str, float]:
+                 progress: Any = None, voice_path: Path | None = None) -> tuple[str, float]:
     """Render scenes to an MP4 in storage. Returns (storage key, duration seconds)."""
     if not scenes:
         raise VideoError("add at least one scene")
@@ -150,8 +150,19 @@ def render_video(scenes: list[dict[str, Any]], *, aspect: str, transition: str, 
                      "-crf", "20", "-pix_fmt", "yuv420p", str(joined)]
             _run(args)
             total = sum(d for _, d in clips) - tdur * (len(clips) - 1)
-        tick(0.85, "Mixing audio" if music else "Finalizing")
-        if music:
+        tick(0.85, "Mixing audio" if (music or voice_path) else "Finalizing")
+        if voice_path is not None:
+            # Voiceover at full level; optional music ducked underneath.
+            args = [exe, "-y", "-loglevel", "error", "-i", str(joined), "-i", str(voice_path)]
+            if music:
+                args += ["-i", str(get_storage().path(music.storage_key))]
+                fc = (f"[1:a]apad,atrim=0:{total:.3f}[v];[2:a]atrim=0:{total:.3f},volume=0.18,"
+                      f"afade=t=out:st={max(0.0, total - 1.5):.3f}:d=1.5[m];[v][m]amix=inputs=2:duration=first[a]")
+            else:
+                fc = f"[1:a]apad,atrim=0:{total:.3f}[a]"
+            _run(args + ["-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                         "-movflags", "+faststart", str(out_path)])
+        elif music:
             mpath = get_storage().path(music.storage_key)
             fade_start = max(0.0, total - 1.5)
             _run([exe, "-y", "-loglevel", "error", "-i", str(joined), "-i", str(mpath), "-filter_complex",

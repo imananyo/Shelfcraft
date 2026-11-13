@@ -35,8 +35,10 @@ def bootstrap() -> None:
             db.add(UserSettings(user_id=user.id, fallback_order=["gemini", "groq", "openrouter", "cloudflare"],
                                 generation_defaults={"aspect": "1:1", "image_size": 1024, "language": "en"}))
         ensure_rows(db)
+    from app.services.playbooks import seed_library
     from app.services.templates import seed_builtin_templates
 
     with session_scope() as db:
         seed_builtin_templates(db)
+        seed_library(db)
     log.info("bootstrap complete")

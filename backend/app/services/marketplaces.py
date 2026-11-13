@@ -23,6 +23,19 @@ MARKETPLACES: dict[str, dict[str, Any]] = {
         "image_size": [2000, 2000],
         "main_image_rules": "Pure white background (RGB 255,255,255), product fills ~85% of frame. Verify current rules.",
     },
+    "amazon_mobile": {
+        "label": "Amazon Mobile",
+        "mobile": True,  # templates scale text up ~1.25× for small screens
+        "fields": {
+            "title": {"max_chars": 80, "note": "Mobile search shows roughly the first 70–80 characters — front-load brand, product and key benefit."},
+            "bullets": {"count": 5, "max_chars": 200, "note": "Mobile shows the first bullets collapsed; lead with the strongest."},
+            "description": {"max_chars": 2000},
+            "search_terms": {"max_bytes": 249, "note": "Backend search terms; no brand names, ASINs or repeats."},
+        },
+        "image_slots": ["main_white", "infographic_features", "lifestyle", "infographic_benefits", "comparison", "dimensions", "detail"],
+        "image_size": [1600, 1600],
+        "main_image_rules": "Pure white background; product large in frame; any infographic text sized for phones.",
+    },
     "shopify": {
         "label": "Shopify",
         "fields": {

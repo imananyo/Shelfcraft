@@ -44,6 +44,8 @@ if (-not (Test-Path "$venv\Scripts\python.exe")) { & py -3.12 -m venv $venv }
 & "$venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
 & "$venv\Scripts\python.exe" -m pip install -r (Join-Path $Root "backend\requirements.txt")
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+# OCR engine for "image → layers" (no-deps: keeps opencv-python-headless instead of pulling opencv-python)
+& "$venv\Scripts\python.exe" -m pip install --quiet --no-deps rapidocr-onnxruntime
 
 # onnxruntime needs the Microsoft VC++ runtime. If it isn't installed system-wide, place the DLLs
 # from the 'msvc-runtime' wheel next to the native modules (no admin rights needed).

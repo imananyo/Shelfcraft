@@ -163,6 +163,18 @@ def h_factory_item(ctx: JobContext) -> dict[str, Any]:
     from app.services.creative import generate_creative
 
     p = ctx.payload
+    if p["creative_type"] == "listing_copy":
+        from app.jobs.handlers_extra import make_listing
+
+        try:
+            with session_scope() as db:
+                batch = db.get(FactoryBatch, p["batch_id"])
+                cfg = (batch.config if batch else {}) or {}
+                proj = make_listing(db, p["product_id"], cfg.get("brand_id"), cfg.get("marketplace", "amazon"),
+                                    {"language": cfg.get("language", "en"), "country": cfg.get("country", "US")}, provider=cfg.get("provider"))
+                return {"project_id": proj.id, "asset_ids": []}
+        except (NoProviderAvailable, ValueError) as e:
+            raise PermanentJobError(str(e)) from e
     try:
         with session_scope() as db:
             batch = db.get(FactoryBatch, p["batch_id"])
