@@ -84,6 +84,21 @@ def test_research_and_listing_flow(client, product, fake_llm):
         assert e.status_code == 200 and len(e.content) > 20
 
 
+def test_listing_image_set_uses_copy_strategy(client, product, fake_llm):
+    lst = client.post("/api/listings", json={"product_id": product["id"], "marketplace": "amazon"}).json()
+    run_pending_jobs()
+    r = client.post(f"/api/listings/{lst['id']}/images", json={"slots": ["main_white", "infographic_features", "comparison"]})
+    assert r.status_code == 202
+    assert run_pending_jobs() == ["succeeded"]
+    full = client.get(f"/api/listings/{lst['id']}").json()
+    assert [i["slot"] for i in full["images"]] == ["main_white", "infographic_features", "comparison"]
+    assert not full["image_errors"]
+    # The feature-callout image used the copy's image strategy callouts as editable text.
+    doc_id = next(i["document_id"] for i in full["images"] if i["slot"] == "infographic_features")
+    texts = [l["text"] for l in client.get(f"/api/documents/{doc_id}").json()["document"]["layers"] if l["type"] == "text"]
+    assert "Built for the trail" in texts and "24h cold" in texts
+
+
 def test_white_background_main_image_uses_real_cutout(client, product):
     r = client.post("/api/creative/generate", json={"creative_type": "white_bg_main", "product_id": product["id"],
                                                     "width": 1000, "height": 1000})

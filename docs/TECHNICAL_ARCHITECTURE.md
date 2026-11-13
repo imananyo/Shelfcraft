@@ -9,7 +9,7 @@
 ## Overview
 
 ```
- Browser (Next.js 15 · React 19 · TS · Tailwind v4 · Radix · Konva)
+ Browser (Next.js 16 · React 19 · TS · Tailwind v4 · Radix · Konva · TanStack Query · Zustand)
         │  same-origin /api/* (Next rewrites → FastAPI)   ← API keys never reach the browser
         ▼
  FastAPI (Python 3.12) ─────────────────────────────────────────────
@@ -38,10 +38,13 @@
 | DB | SQLite (WAL, foreign keys ON) | Single user, zero ops; Postgres-compatible models for later. |
 | Jobs | DB table `jobs` + `job_attempts`, `ThreadPoolExecutor` workers (default 2; image jobs limited to 1 on CPU), claim via atomic UPDATE, startup recovery sets stale `running` → `queued` | No Redis/Docker; survives restarts. |
 | Text AI | Adapters: Ollama (default, local), Gemini, Groq, OpenRouter (`:free` models only), Mistral, Cloudflare Workers AI | Free-only; registry + fallback chain. |
-| Image AI | Local SD-Turbo via diffusers on CPU (optional install), Cloudflare Workers AI image models (if free allocation verified), compositing pipeline that always works | Honest given hardware. |
+| Image AI | Local SD-Turbo via diffusers on CPU (measured 27–36 s per composite), Cloudflare Workers AI `flux-1-schnell` (free allocation, opt-in), labeled non-AI gradient fallback | Honest given hardware. |
 | Editing AI | rembg (U²-Net, MIT) for background removal; LaMa ONNX (Apache-2.0) for object removal; OpenCV Telea inpaint as labeled non-AI fallback | Runs on CPU. |
 | Video | FFmpeg via subprocess arg lists | Reliable, free, already installed. |
-| Auth | Single local user; optional access token (`SHELFCRAFT_ACCESS_TOKEN`) required by API when set; server binds 127.0.0.1 | Personal MVP with sensible protection. |
+| Auth | Single local user; optional access token (`SHELFCRAFT_ACCESS_TOKEN`) required by API when set; API **and** web server bind 127.0.0.1 | Personal MVP with sensible protection (the web server proxies `/api`, so it must not be LAN-exposed). |
+| Rendering | Client-side rendering after mount (no SSR of app pages) | Local data-driven tool, no SEO; avoids hydration mismatches with Suspense + live queries. |
+| Image prompts | ≤ ~55 words, most important instructions first; product never named in background prompts | CLIP reads only 77 tokens; few-step models ignore negative prompts. |
+| Job progress | In-memory live progress, persisted on completion; commit before slow AI calls | SQLite allows one writer; long-held write locks would block the UI. |
 
 ## Provider selection & fallback
 1. Requested provider (or user's default) if enabled, free-eligible, circuit closed.

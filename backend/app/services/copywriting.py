@@ -60,14 +60,26 @@ def run_research(db: Session, product_id: str, *, reviews: str = "", competitors
     if p is None:
         raise ValueError("product not found")
     brand_txt = brand_context(db, p.brand_id)
+    # Conditional instructions: small local models follow "if X is missing…" literally even when X is present,
+    # so each instruction is only included when it applies.
+    rules: list[str] = []
+    if reviews.strip():
+        review_block = f"Customer reviews supplied by the user:\n{reviews.strip()[:12000]}"
+        rules.append("Analyze the supplied reviews: fill review_sentiment.positive_themes and negative_themes from them "
+                     "and set overall to positive, mixed or negative.")
+    else:
+        review_block = "No customer reviews were supplied."
+        rules.append("Set review_sentiment.overall to 'no data' and leave its theme lists empty.")
+    if competitors.strip():
+        comp_block = f"Competitor information supplied by the user:\n{competitors.strip()[:8000]}"
+        rules.append("Compare against each named competitor in competitor_comparison.")
+    else:
+        comp_block = "No competitor information was supplied."
+        rules.append("Return an empty competitor_comparison list.")
     prompt = (
         f"Analyze this product for e-commerce marketing.\n\n{product_facts(p)}\n\n"
-        f"{brand_txt and 'Brand profile:' + chr(10) + brand_txt}\n\n"
-        f"Customer reviews supplied by the user (may be empty):\n{reviews.strip()[:12000] or '(none provided)'}\n\n"
-        f"Competitor information supplied by the user (may be empty):\n{competitors.strip()[:8000] or '(none provided)'}\n\n"
-        f"Additional notes: {notes.strip()[:2000] or '(none)'}\n\n"
-        "If reviews are not provided, set review_sentiment.overall to 'no data' and leave themes empty. "
-        "If competitor info is not provided, return an empty competitor_comparison list. "
+        f"{brand_txt and 'Brand profile:' + chr(10) + brand_txt}\n\n{review_block}\n\n{comp_block}\n\n"
+        f"Additional notes: {notes.strip()[:2000] or '(none)'}\n\n" + " ".join(rules) + "\n"
         f"Return JSON exactly in this shape:\n{RESEARCH_SCHEMA}"
     )
     res = fm.generate_text(TextRequest(prompt=prompt, system=SYSTEM, json_mode=True, temperature=0.4,

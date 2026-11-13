@@ -36,9 +36,9 @@ $env:SHELFCRAFT_API_ORIGIN = "http://127.0.0.1:$ApiPort"
 if ($Prod) {
   Write-Host "Building web app (production)..." -ForegroundColor Cyan
   Push-Location $web; npm run build; if ($LASTEXITCODE -ne 0) { Pop-Location; Stop-Process $api.Id; throw "Build failed" }; Pop-Location
-  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run start -- -p $WebPort > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
+  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run start -- -p $WebPort -H 127.0.0.1 > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
 } else {
-  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run dev -- -p $WebPort > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
+  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run dev -- -p $WebPort -H 127.0.0.1 > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
 }
 @{ api = $api.Id; web = $webProc.Id } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $Root "data\.pids.json")
 
@@ -49,6 +49,6 @@ for ($i = 0; $i -lt 90; $i++) {
   try { $h = Invoke-RestMethod "http://127.0.0.1:$ApiPort/api/health" -TimeoutSec 3; Invoke-WebRequest "http://127.0.0.1:$WebPort" -UseBasicParsing -TimeoutSec 5 | Out-Null; $ok = $true; break } catch {}
 }
 if (-not $ok) { Write-Warning "Services didn't respond in time. Check data\logs\api-stderr.log and data\logs\web.log"; exit 1 }
-Write-Host "Shelfcraft is running: http://localhost:$WebPort   (API health: $($h.status))" -ForegroundColor Green
+Write-Host "Shelfcraft is running: http://127.0.0.1:$WebPort   (API health: $($h.status))" -ForegroundColor Green
 Write-Host "Stop it with: powershell -ExecutionPolicy Bypass -File scripts\stop.ps1"
-if (-not $NoBrowser) { Start-Process "http://localhost:$WebPort" }
+if (-not $NoBrowser) { Start-Process "http://127.0.0.1:$WebPort" }
