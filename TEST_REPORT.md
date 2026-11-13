@@ -17,14 +17,16 @@
 
 ## Phase 2 (Pixii-parity) additions
 
-**pytest (`tests/test_growth.py`, 19 tests):** listing grader scores and fixes; paste-import parser; translate job
-(copy + language validation); packaging ideas and ad concepts (job → stored concepts); playbook library seeding, step
-validation, run and apply-to-product; image → layers (OCR + cut-out + LaMa clean plate); 360° spin from photos (MP4 via
-ffprobe); voiceover (offline SAPI) mixed into the video; A+ seamless module and slice export; `amazon_mobile`
-marketplace; bulk listing copy in the factory; public API keys (hashed at rest, scopes, revoke, rate limit 120/min, key
-never shown twice); MCP server tool registration; team mode (owner bootstrap, invite → join, role enforcement, viewer
-can't write, session cookie, LAN refusal without team mode); SP-API connector configuration and secrets never
-returned.
+**pytest (`tests/test_growth.py`, 19 tests):** listing grader (good vs bad listing, white-main-image detection, AI
+review); translate listing copy and image text; bulk listing copy and the factory `listing_copy` type; packaging ideas;
+ad concepts + render; playbook library import/edit/run; apply a design to a different product; image → layers (OCR);
+360° spin from angle photos; voiceover video with offline TTS; A+ seamless module exports 3 slices of 1464×600;
+paste-import parser; Amazon connector requires setup and never returns secrets; public API keys (no key → 401,
+read scope can't write → 403, key not listed back, revoke → 401, `/v1/openapi.json`); MCP server tools registered and
+calling `/v1`; team mode (owner setup, invite → accept, viewer can't write, logout, wrong password rejected).
+
+Not unit-tested: the 120 req/min rate limit, the `amazon_mobile` preview, and the `-Lan` refusal in `start.ps1` (code path reviewed: it
+reads `/api/auth/status` and keeps the web app on 127.0.0.1 unless team mode is on).
 
 **New E2E journeys:** add a product inline from New listing; listing grader; import a playbook template; create an API
 key → call `/v1` → revoke.
