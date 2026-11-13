@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { QuickAddProduct } from "@/components/quick-add-product";
 import { AssetResult, BrandSelect, JobCard, ProductSelect } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/form";
@@ -76,7 +77,7 @@ function Studio() {
       <PageHeader title="Image studio" description="Main images, lifestyle scenes, infographics and ads. Every result shows exactly which model made it." />
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
         <Card className="flex flex-col gap-4 p-5 lg:sticky lg:top-0 lg:max-h-[calc(100vh-120px)] lg:self-start lg:overflow-y-auto scrollbar-thin">
-          <Field label="Product" aside={<Link href="/products" className="text-primary hover:underline">Add</Link>}><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
+          <Field label="Product" aside={<QuickAddProduct onCreated={setProductId} />}><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
           {noPhoto && <Notice tone="warning">This product has no photo. AI will imagine the product — it won&apos;t match your real item. <Link className="underline" href={`/products/${productId}?tab=images`}>Add a photo</Link></Notice>}
           <Field label="Creative type">
             <Select value={type} onChange={(e) => setType(e.target.value)}>

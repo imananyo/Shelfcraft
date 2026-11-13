@@ -88,3 +88,16 @@ test("settings: paid/unverified provider cannot be enabled; keys never rendered"
   const html = await page.content();
   expect(html).not.toMatch(/gsk_[A-Za-z0-9]{10,}|AIza[0-9A-Za-z_-]{20,}|sk-or-[A-Za-z0-9-]{10,}/);
 });
+
+test("new listing: add a product inline and it is auto-selected", async ({ page }) => {
+  await page.goto("/listings/new");
+  await page.getByRole("button", { name: "New product" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.locator("input[type=file]").setInputFiles({ name: "q.png", mimeType: "image/png", buffer: png(64, 64, [200, 120, 60]) });
+  await dialog.getByPlaceholder("e.g. Bamboo Cutting Board, Large").fill(`Inline Product ${stamp}`);
+  await dialog.getByPlaceholder("e.g. Organic bamboo, juice groove").fill("Organic bamboo");
+  await dialog.getByRole("button", { name: "Add & select" }).click();
+  await expect(dialog).toBeHidden();
+  const select = page.getByRole("combobox", { name: "Product" });
+  await expect(select.locator("option:checked")).toHaveText(`Inline Product ${stamp}`);
+});

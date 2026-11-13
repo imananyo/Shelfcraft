@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { QuickAddProduct } from "@/components/quick-add-product";
 import { BrandSelect, ProductSelect } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
@@ -41,7 +42,7 @@ function NewAplus() {
       <div className="flex flex-col gap-6">
         <Card className="grid gap-4 p-5 sm:grid-cols-3">
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Product"><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
+          <Field label="Product" aside={<QuickAddProduct label="New" onCreated={setProductId} />}><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
           <Field label="Brand"><BrandSelect value={brandId} onChange={setBrandId} /></Field>
         </Card>
         <div className="grid gap-3 sm:grid-cols-3">

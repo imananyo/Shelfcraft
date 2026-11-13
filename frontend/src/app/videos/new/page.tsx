@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { QuickAddProduct } from "@/components/quick-add-product";
 import { ProductSelect } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -39,7 +40,7 @@ function NewVideo() {
         <div className="grid gap-3 sm:grid-cols-2">{FORMATS.map((f) => <OptionCard key={f.aspect} icon={f.icon} title={f.title} description={f.description} selected={aspect === f.aspect} onClick={() => setAspect(f.aspect)} />)}</div>
         <Card className="grid gap-4 p-5 sm:grid-cols-3">
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Product" hint="Photos & creatives become scenes"><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
+          <Field label="Product" hint="Photos & creatives become scenes" aside={<QuickAddProduct label="New" onCreated={setProductId} />}><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
           <Field label="Target duration"><Select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>{[6, 10, 15, 20, 30, 45, 60].map((s) => <option key={s} value={s}>{s} seconds</option>)}</Select></Field>
         </Card>
         <Notice>Talking-avatar UGC and 360° spins need generative video models that don&apos;t run on this computer for free — they&apos;re not offered rather than faked.</Notice>

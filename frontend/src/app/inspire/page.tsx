@@ -3,6 +3,7 @@ import { ImagePlus, Info, LayoutTemplate, Palette, ScanSearch, Sparkles, Type } 
 import Link from "next/link";
 import * as React from "react";
 import { toast } from "sonner";
+import { QuickAddProduct } from "@/components/quick-add-product";
 import { AssetPicker, AssetResult, BrandSelect, JobCard, ProductSelect } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch } from "@/components/ui/form";
@@ -100,7 +101,7 @@ export default function InspirePage() {
               <Card className="flex flex-col gap-3 p-5">
                 <div className="text-[14px] font-semibold">Create with your product</div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Product *"><ProductSelect value={productId} onChange={setProductId} /></Field>
+                  <Field label="Product *" aside={<QuickAddProduct label="New" onCreated={setProductId} />}><ProductSelect value={productId} onChange={setProductId} /></Field>
                   <Field label="Brand"><BrandSelect value={brandId} onChange={setBrandId} /></Field>
                 </div>
                 <Field label="Headline" hint="Defaults to your product name"><Input value={headline} onChange={(e) => setHeadline(e.target.value)} /></Field>
