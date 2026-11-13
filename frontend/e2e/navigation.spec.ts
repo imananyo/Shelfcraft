@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const ROUTES: [string, RegExp][] = [
-  ["/", /What should we make today|Working on/], ["/create", /What should we work on/], ["/listings", /Listing builder/],
+  ["/create", /What should we work on/], ["/listings", /Listing builder/],
   ["/studio", /Image studio/], ["/edit", /Spot edit/], ["/aplus", /A\+ content/], ["/videos", /Video creator/],
   ["/inspire", /Inspire/], ["/factory", /Factory/], ["/projects", /Designs & projects/], ["/library", /Asset library/],
   ["/jobs", /Jobs/], ["/brands", /Brands/], ["/products", /Products/], ["/settings", /Settings/],
@@ -11,6 +11,8 @@ test("every main page renders without runtime errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(`${page.url()}: ${e.message}`));
   page.on("console", (m) => { if (m.type() === "error" && !m.text().includes("fonts.googleapis")) errors.push(`${page.url()}: ${m.text()}`); });
+  await page.goto("/");
+  await expect(page.getByText(/^(Working on|Welcome)$/i)).toBeVisible(); // dashboard h1 is the active brand name
   for (const [path, heading] of ROUTES) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 }).first()).toHaveText(heading);

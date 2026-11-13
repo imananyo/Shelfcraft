@@ -121,6 +121,14 @@ export default function EditorPage() {
   }, [save]);
 
   const exportClient = async (fmt: "png" | "jpeg", toLibrary = false) => {
+    try {
+      await exportClientInner(fmt, toLibrary);
+    } catch (e) {
+      console.error("[Shelfcraft] export failed", e);
+      toast.error(`Export failed: ${(e as Error).message}. Try “WebP (server render)” instead.`);
+    }
+  };
+  const exportClientInner = async (fmt: "png" | "jpeg", toLibrary: boolean) => {
     const url = stageHandle.exportDataURL?.(`image/${fmt}`, 0.92);
     if (!url) return toast.error("Canvas not ready yet");
     const blob = await (await fetch(url)).blob();

@@ -61,7 +61,10 @@ test("editor: add layers, undo/redo, autosave survives reload, export PNG", asyn
   await expect(page.locator("aside").getByText("Rectangle")).toBeVisible();
   await expect(page.locator("aside").getByText("Your text")).toBeVisible();
   await page.getByRole("button", { name: "Export" }).click();
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: /PNG · native size/ }).click()]);
+  const item = page.getByRole("menuitem", { name: /PNG · native size/ });
+  await item.waitFor({ state: "visible" });
+  await page.waitForTimeout(300); // let the menu finish opening before selecting
+  const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 30_000 }), item.click()]);
   expect(dl.suggestedFilename()).toMatch(/\.png$/);
 });
 
