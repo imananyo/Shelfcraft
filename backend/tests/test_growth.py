@@ -293,6 +293,31 @@ def test_mcp_server_tools(client, prod, monkeypatch):
     assert 0 <= g["score"] <= 100 and g["top_fixes"]
 
 
+# ---------------------------------------------------------------- AI output shape (regression: keywords returned as a string)
+def test_normalize_copy_coerces_model_output():
+    from app.services.copywriting import normalize_copy
+
+    c = normalize_copy({"title": ["Gold", "Ring"], "bullets": "One\nTwo", "keywords": "gold jewelry, green gemstone, ",
+                        "benefits": None, "image_strategy": {"slot": "main", "callouts": "a\nb"}, "feature_explanations": "x"})
+    assert c["title"] == "Gold Ring" and c["bullets"] == ["One", "Two"]
+    assert c["keywords"] == ["gold jewelry", "green gemstone"] and c["benefits"] == []
+    assert c["image_strategy"] == [{"slot": "main", "callouts": ["a", "b"]}] and c["feature_explanations"] == []
+
+
+def test_listing_with_string_keywords_is_served_as_list(client, prod):
+    from app.db.models import Project
+    from app.db.session import session_scope
+
+    with session_scope() as db:
+        p = Project(kind="listing", name="legacy", product_id=prod["id"],
+                    data={"marketplace": "amazon", "copy": {"title": "T", "keywords": "a, b", "bullets": ["x"]}})
+        db.add(p)
+        db.flush()
+        pid = p.id
+    assert client.get(f"/api/listings/{pid}").json()["copy"]["keywords"] == ["a", "b"]
+    assert "a, b" in client.get(f"/api/listings/{pid}/export?format=txt").text
+
+
 # ---------------------------------------------------------------- team mode (runs last: toggles auth)
 def test_team_mode_login_invite_roles(client):
     from tests.conftest import TestClient  # noqa: F401

@@ -30,6 +30,27 @@ function Counter({ n, max, unit = "chars" }: { n: number; max?: number; unit?: s
   return <span className={cn(n > max && "font-medium text-danger")}>{n}/{max} {unit}</span>;
 }
 
+/** Guard against AI output in an unexpected shape (e.g. keywords as one string) so the editor never crashes. */
+function toList(v: unknown, sep: string): string[] {
+  if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? x : JSON.stringify(x)));
+  if (typeof v === "string") return v.split(sep).map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+function toText(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.join(" ");
+  return v == null ? "" : String(v);
+}
+function safeCopy(c: ListingCopy): ListingCopy {
+  return { ...c, title: toText(c.title), description: toText(c.description), search_terms: toText(c.search_terms),
+    bullets: toList(c.bullets, "\n"), keywords: toList(c.keywords, ","), benefits: toList(c.benefits, "\n"),
+    listing_structure: toList(c.listing_structure, "\n"), creative_recommendations: toList(c.creative_recommendations, "\n"),
+    assumptions: toList(c.assumptions, "\n"),
+    feature_explanations: Array.isArray(c.feature_explanations) ? c.feature_explanations.filter((f) => f && typeof f === "object") : [],
+    image_strategy: (Array.isArray(c.image_strategy) ? c.image_strategy.filter((s) => s && typeof s === "object") : [])
+      .map((s) => ({ ...s, callouts: toList(s.callouts, "\n") })) };
+}
+
 function ListingInner() {
   const { id } = useParams<{ id: string }>();
   const sp = useSearchParams();
@@ -51,7 +72,7 @@ function ListingInner() {
     const running = L.jobs.find((j) => (j.status === "queued" || j.status === "running"));
     if (running && !jobId && running.type === "listing_copy") setJobId(running.id);
     if (running && !imgJob && running.type === "listing_images") setImgJob(running.id);
-    if (!dirty) setCopy(L.copy ?? { title: "", bullets: ["", "", "", "", ""], description: "", keywords: [], search_terms: "" });
+    if (!dirty) setCopy(L.copy ? safeCopy(L.copy) : { title: "", bullets: ["", "", "", "", ""], description: "", keywords: [], search_terms: "" });
   }, [L, dirty, jobId, imgJob]);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["listing", id] });

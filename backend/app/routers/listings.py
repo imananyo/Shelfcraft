@@ -17,6 +17,7 @@ from app.db.session import get_db
 from app.jobs.queue import enqueue
 from app.routers.common import get_or_404, soft_delete
 from app.routers.jobs import job_out
+from app.services.copywriting import normalize_copy
 from app.services.marketplaces import MARKETPLACES, SIZE_PRESETS, validate_copy
 
 router = APIRouter(tags=["listings"])
@@ -83,7 +84,7 @@ def listing_out(db: Session, p: Project) -> dict[str, Any]:
     return {
         "id": p.id, "name": p.name, "product_id": p.product_id, "product_name": product.name if product else None,
         "brand_id": p.brand_id, "marketplace": data.get("marketplace", "amazon"), "options": data.get("options", {}),
-        "copy": data.get("copy"), "warnings": data.get("warnings", []), "provenance": data.get("provenance"),
+        "copy": normalize_copy(data.get("copy")), "warnings": data.get("warnings", []), "provenance": data.get("provenance"),
         "versions": len(data.get("versions") or []), "images": images, "image_errors": data.get("image_errors", []),
         "limits": MARKETPLACES.get(data.get("marketplace", "amazon"), MARKETPLACES["amazon"])["fields"],
         "jobs": [job_out(j) for j in jobs], "updated_at": p.updated_at, "created_at": p.created_at,
@@ -207,8 +208,8 @@ def versions(project_id: str, db: Session = Depends(get_db)) -> list[dict[str, A
 def export_listing(project_id: str, format: str = Query("txt", pattern="^(txt|json|csv)$"),
                    db: Session = Depends(get_db)) -> Response:
     p = get_or_404(db, Project, project_id)
-    c = (p.data or {}).get("copy") or {}
-    name = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in p.name)[:80]
+    c = normalize_copy((p.data or {}).get("copy")) or {}
+    name ="".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in p.name)[:80]
     if format == "json":
         body, mime = json.dumps({"marketplace": (p.data or {}).get("marketplace"), **c}, indent=2, ensure_ascii=False), "application/json"
     elif format == "csv":

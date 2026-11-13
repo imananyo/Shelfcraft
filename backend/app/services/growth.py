@@ -43,7 +43,9 @@ def translate_listing(db: Session, project_id: str, language: str, country: str,
     if src is None or src.kind != "listing":
         raise ValueError("listing not found")
     data = src.data or {}
-    c = data.get("copy") or {}
+    from app.services.copywriting import normalize_copy
+
+    c = normalize_copy(data.get("copy")) or {}
     if not c:
         raise ValueError("this listing has no copy yet — generate it first")
     fields = [c.get("title", ""), *(c.get("bullets") or []), c.get("description", ""), c.get("search_terms", ""),

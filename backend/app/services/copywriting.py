@@ -157,7 +157,56 @@ def generate_listing_copy(db: Session, product_id: str, brand_id: str | None, ma
     data = res.json()
     if not isinstance(data, dict):
         raise ValueError("model returned unexpected JSON")
-    return data, res.provider, res.model
+    return normalize_copy(data), res.provider, res.model
+
+
+_LIST_FIELDS = ("bullets", "keywords", "benefits", "listing_structure", "creative_recommendations", "assumptions")
+_TEXT_FIELDS = ("title", "description", "search_terms", "headline", "subheadline")
+
+
+def _as_text(v: Any) -> str:
+    if isinstance(v, dict):
+        return " ".join(_as_text(x) for x in v.values())
+    if isinstance(v, (list, tuple)):
+        return " ".join(_as_text(x) for x in v)
+    return "" if v is None else str(v).strip()
+
+
+def _as_list(v: Any, field: str) -> list[str]:
+    if v is None:
+        return []
+    if isinstance(v, str):
+        sep = "," if field == "keywords" else "\n"
+        parts = v.split(sep) if sep in v else ([v] if field != "keywords" else v.split(","))
+        return [s.strip(" •-*\t") for s in parts if s.strip(" •-*\t")]
+    if isinstance(v, dict):
+        v = list(v.values())
+    if isinstance(v, (list, tuple)):
+        return [t for t in (_as_text(x) for x in v) if t]
+    return [str(v)]
+
+
+def normalize_copy(copy: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Small local models don't always follow the JSON schema (e.g. `keywords` as one comma-separated string).
+    Coerce every field to the shape the editor and exporters expect; unknown fields are kept as-is."""
+    if not isinstance(copy, dict):
+        return copy
+    out = dict(copy)
+    for f in _LIST_FIELDS:
+        if f in out:
+            out[f] = _as_list(out[f], f)
+    for f in _TEXT_FIELDS:
+        if f in out and not isinstance(out[f], str):
+            out[f] = _as_text(out[f])
+    for f in ("image_strategy", "feature_explanations"):
+        if f in out:
+            v = out[f]
+            v = v if isinstance(v, list) else ([v] if isinstance(v, dict) else [])
+            out[f] = [x for x in v if isinstance(x, dict)]
+    for s in out.get("image_strategy", []):
+        if "callouts" in s:
+            s["callouts"] = _as_list(s["callouts"], "callouts")
+    return out
 
 
 def creative_prompt(p: Product | None, brand: Brand | None, creative_type: str, style: str, extra: str = "",
