@@ -1,26 +1,135 @@
 @import "tailwindcss";
 
+/* Shelfcraft design tokens (see docs/DESIGN_SYSTEM.md). Warm neutral paper, deep-teal primary,
+   violet reserved for actions that call an AI provider. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: oklch(0.985 0.003 75);
+  --surface: oklch(0.998 0.002 75);
+  --sunken: oklch(0.962 0.004 75);
+  --foreground: oklch(0.2 0.012 75);
+  --muted-foreground: oklch(0.5 0.012 75);
+  --border: oklch(0.915 0.006 75);
+  --border-strong: oklch(0.86 0.008 75);
+  --primary: oklch(0.5 0.105 188);
+  --primary-hover: oklch(0.45 0.1 188);
+  --primary-soft: oklch(0.95 0.03 188);
+  --primary-foreground: oklch(0.985 0.003 75);
+  --ai: oklch(0.56 0.18 292);
+  --ai-hover: oklch(0.51 0.18 292);
+  --ai-soft: oklch(0.955 0.03 292);
+  --ai-foreground: oklch(0.99 0.005 292);
+  --success: oklch(0.6 0.14 150);
+  --success-soft: oklch(0.95 0.04 150);
+  --warning: oklch(0.7 0.15 75);
+  --warning-soft: oklch(0.96 0.05 85);
+  --danger: oklch(0.58 0.2 27);
+  --danger-soft: oklch(0.955 0.03 27);
+  --ring: oklch(0.5 0.105 188 / 0.45);
+  --checker-a: oklch(0.95 0.003 75);
+  --checker-b: oklch(0.99 0.002 75);
+  --shadow-color: 30 20% 20%;
+}
+
+.dark {
+  --background: oklch(0.17 0.006 75);
+  --surface: oklch(0.21 0.007 75);
+  --sunken: oklch(0.15 0.006 75);
+  --foreground: oklch(0.96 0.004 75);
+  --muted-foreground: oklch(0.7 0.01 75);
+  --border: oklch(0.29 0.008 75);
+  --border-strong: oklch(0.36 0.009 75);
+  --primary: oklch(0.7 0.11 185);
+  --primary-hover: oklch(0.76 0.1 185);
+  --primary-soft: oklch(0.28 0.04 188);
+  --primary-foreground: oklch(0.17 0.01 190);
+  --ai: oklch(0.72 0.15 292);
+  --ai-hover: oklch(0.78 0.13 292);
+  --ai-soft: oklch(0.28 0.05 292);
+  --ai-foreground: oklch(0.17 0.02 292);
+  --success: oklch(0.72 0.14 150);
+  --success-soft: oklch(0.27 0.04 150);
+  --warning: oklch(0.8 0.14 80);
+  --warning-soft: oklch(0.29 0.04 80);
+  --danger: oklch(0.7 0.17 27);
+  --danger-soft: oklch(0.28 0.05 27);
+  --ring: oklch(0.7 0.11 185 / 0.5);
+  --checker-a: oklch(0.24 0.006 75);
+  --checker-b: oklch(0.28 0.006 75);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --color-muted: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ai: var(--ai);
+  --color-ai-hover: var(--ai-hover);
+  --color-ai-soft: var(--ai-soft);
+  --color-ai-foreground: var(--ai-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-bricolage), var(--font-geist), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --shadow-card: 0 1px 0 0 hsl(var(--shadow-color) / 0.04), 0 1px 2px 0 hsl(var(--shadow-color) / 0.06);
+  --shadow-pop: 0 10px 30px -10px hsl(var(--shadow-color) / 0.28), 0 2px 6px -2px hsl(var(--shadow-color) / 0.12);
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  @keyframes shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * { border-color: var(--border); }
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  ::selection { background: var(--primary-soft); }
+  input[type="number"]::-webkit-inner-spin-button { opacity: 0.5; }
+}
+
+@layer components {
+  .checkerboard {
+    background-color: var(--checker-b);
+    background-image:
+      linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, var(--sunken) 0, var(--border) 80px, var(--sunken) 160px);
+    background-size: 800px 100%;
+    animation: var(--animate-shimmer);
+    border-radius: var(--radius-md);
+  }
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 }

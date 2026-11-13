@@ -32,7 +32,8 @@ def job_out(j: Job) -> dict[str, Any]:
         "attempts": j.attempts, "max_attempts": j.max_attempts, "batch_id": j.batch_id,
         "project_id": j.project_id, "created_at": j.created_at, "started_at": j.started_at,
         "finished_at": j.finished_at, "payload_summary": {k: v for k, v in (j.payload or {}).items()
-                                                          if k in ("product_id", "creative_type", "title", "kind")},
+                                                          if k in ("product_id", "product_name", "variant_name",
+                                                                   "creative_type", "title", "kind", "operation")},
     }
 
 
