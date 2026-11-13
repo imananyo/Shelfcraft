@@ -64,8 +64,11 @@ for ($i = 0; $i -lt 90; $i++) {
 if (-not $ok) { Write-Warning "Services didn't respond in time. Check data\logs\api-stderr.log and data\logs\web.log"; exit 1 }
 Write-Host "Shelfcraft is running: http://127.0.0.1:$WebPort   (API health: $($h.status))" -ForegroundColor Green
 if ($webHost -eq "0.0.0.0") {
-  $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress
-  Write-Host "Teammates on your network: http://${ip}:$WebPort  (Windows Firewall may ask to allow Node.js — allow on Private networks only)" -ForegroundColor Yellow
+  # Prefer the adapter that has a default gateway (your real Wi-Fi/Ethernet), not virtual adapters.
+  $cfg = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
+  $ip = if ($cfg) { $cfg.IPv4Address.IPAddress | Select-Object -First 1 } else {
+    (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress }
+  Write-Host "Phone app / teammates on your Wi-Fi: http://${ip}:$WebPort  (Windows Firewall may ask to allow Node.js — allow on Private networks only)" -ForegroundColor Yellow
 }
 Write-Host "Stop it with: powershell -ExecutionPolicy Bypass -File scripts\stop.ps1"
 if (-not $NoBrowser) { Start-Process "http://127.0.0.1:$WebPort" }
