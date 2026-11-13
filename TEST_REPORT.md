@@ -7,12 +7,36 @@
 
 | Suite | Tool | Result |
 |---|---|---|
-| Backend unit/integration | pytest | **39 passed** (67 s) |
+| Backend unit/integration | pytest | **58 passed** (39 core + 19 phase-2 growth/API/MCP/team tests) |
 | Frontend type-check | `tsc --noEmit` | **0 errors** |
-| Frontend lint | ESLint (next core-web-vitals + TS) | **0 errors**, 22 warnings (all `react-hooks/set-state-in-effect`, intentionally downgraded — see `eslint.config.mjs`) |
+| Frontend lint | ESLint (next core-web-vitals + TS) | **0 errors**, 26 warnings (`react-hooks/set-state-in-effect` intentionally downgraded — see `eslint.config.mjs`; 3 `window.location` navigations; 2 unused stub args in tests) |
 | Frontend unit | Vitest | **13 passed** |
-| End-to-end | Playwright (installed Chrome) | **11 passed** — 8 desktop (1440×900) + 3 tablet (834×1112) |
+| End-to-end | Playwright (installed Chrome) | **15 passed** — 12 desktop (1440×900) + 3 tablet (834×1112) |
 | Real-model smoke run | `backend\scripts\e2e_real.py` | **7 / 7 passed** (actual local models, no stubs) |
+| Real-model smoke run, phase 2 | `backend\scripts\e2e_real_growth.py` | **4 / 4 passed** |
+
+## Phase 2 (Pixii-parity) additions
+
+**pytest (`tests/test_growth.py`, 19 tests):** listing grader scores and fixes; paste-import parser; translate job
+(copy + language validation); packaging ideas and ad concepts (job → stored concepts); playbook library seeding, step
+validation, run and apply-to-product; image → layers (OCR + cut-out + LaMa clean plate); 360° spin from photos (MP4 via
+ffprobe); voiceover (offline SAPI) mixed into the video; A+ seamless module and slice export; `amazon_mobile`
+marketplace; bulk listing copy in the factory; public API keys (hashed at rest, scopes, revoke, rate limit 120/min, key
+never shown twice); MCP server tool registration; team mode (owner bootstrap, invite → join, role enforcement, viewer
+can't write, session cookie, LAN refusal without team mode); SP-API connector configuration and secrets never
+returned.
+
+**New E2E journeys:** add a product inline from New listing; listing grader; import a playbook template; create an API
+key → call `/v1` → revoke.
+
+**Real-model run (`e2e_real_growth.py`):**
+
+| Step | Engine | Time | Result |
+|---|---|---|---|
+| Translate listing to German | Ollama `qwen2.5:3b` | 68 s | ✅ "Hearth & Field Sage Stoneware Kaffeetasse 12 oz" |
+| Packaging ideas | Ollama `qwen2.5:3b` | 100 s | ✅ 5 concepts |
+| Ad concepts (Sponsored Brands image) | Ollama `qwen2.5:3b` | 48 s | ✅ 4 concepts |
+| Voiceover video | Ollama script + Windows SAPI voice + FFmpeg | 16 s | ✅ 7 spoken lines, 16.5 s MP4 |
 
 ## Backend (pytest, 39 tests)
 
@@ -62,4 +86,7 @@ processes on stop, flaky export selection, and more). Every fix was re-verified 
 
 * Hosted providers (Gemini, Groq, OpenRouter, Cloudflare) against the real services — **no keys configured**; adapters are covered with fakes.
 * `generative_fill` (replace object) and `extend` image quality — code paths exist; output quality is model-dependent and was not formally evaluated.
+* **Amazon SP-API import** against Amazon's real service — needs your own seller developer credentials; covered only with mocked HTTP.
+* The MCP server inside a real MCP client (Claude Desktop / Claude Code) — tool registration and the `/v1` calls it makes are tested; the stdio session with a client was not.
+* Team mode across two physical machines on a LAN (tested on one PC with two browser sessions' worth of cookies).
 * PostgreSQL; a full clean `setup.ps1` run on a fresh machine; phone-sized layouts; long-duration soak tests.

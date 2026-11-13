@@ -31,3 +31,16 @@ a read-only CDP script handled navigation/screenshots (no generation, no credits
 - Small model ignored supplied reviews due to unconditional "if no reviews…" instruction → conditional rules.
 - Editor: web fonts loaded before stylesheet → wait for CSS then `document.fonts.load`; Space-to-pan used a ref during render; tablet properties panel covered the toolbar; detached anchor export.
 - `stop.ps1` left orphaned server processes → port-owner cleanup restricted to Shelfcraft's own command lines.
+
+## 2026-11-13 — Phase 2 (Pixii parity)
+
+**Added:** Create wizard, Scale (translate / apply playbooks), Playbooks + library, Labs (Title & Bullets bulk, Packaging ideas),
+Listing grader, Ads studio, Recent work, image → layers, 360° spin from photos, offline voiceover, A+ seamless slices,
+Amazon mobile preview, paste/ASIN import, public API `/v1` with keys, MCP server, team mode with roles and `-Lan`.
+
+**Issues found & fixed**
+- `rapidocr-onnxruntime` pulled `opencv-python` and the install aborted on a locked `cv2.pyd` → installed with `--no-deps` (OpenCV headless already present and verified).
+- `mcp` 2.x renamed `FastMCP` → `MCPServer` (`mcp.server.mcpserver`).
+- `start.ps1` exited 1: PowerShell 5.1 reads BOM-less UTF-8 as ANSI, so an em dash became a closing quote → all `.ps1` saved with BOM; `test.ps1` now parses every script and checks the BOM.
+- Flaky E2E Ctrl+K test (palette opened before the client-only app mounted) → wait for the sidebar first.
+- Docs/UI claimed SP-API is "free for sellers" without verification → reworded to "check Amazon's current developer terms".
