@@ -179,14 +179,67 @@ def parse_json_loose(text: str) -> Any:
         return json.loads(t)
     except json.JSONDecodeError:
         pass
+    obj_first = t.find("{") != -1 and (t.find("[") == -1 or t.find("{") < t.find("["))
     for open_c, close_c in (("{", "}"), ("[", "]")):
+        if open_c == "[" and obj_first:
+            # The answer is an object; a nested list is not the answer — salvage the (cut-off) object instead.
+            repaired = repair_truncated_json(t)
+            if repaired is not None:
+                return repaired
         start, end = t.find(open_c), t.rfind(close_c)
         if start != -1 and end > start:
             try:
                 return json.loads(t[start : end + 1])
             except json.JSONDecodeError:
                 continue
+    repaired = repair_truncated_json(t)
+    if repaired is not None:
+        return repaired
     raise ValueError("model did not return valid JSON")
+
+
+def repair_truncated_json(text: str) -> Any:
+    """Salvage a JSON object that was cut off (output-token cap hit, e.g. when a small model loops).
+    Cuts back to the last complete value and closes the open brackets. Returns None if nothing parses."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    s = text[start:]
+    stack: list[str] = []
+    in_str = esc = False
+    cuts: list[tuple[int, list[str]]] = []
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            if not stack:
+                try:
+                    return json.loads(s[: i + 1])
+                except json.JSONDecodeError:
+                    return None
+            cuts.append((i + 1, list(stack)))
+        elif ch == ",":
+            cuts.append((i, list(stack)))
+    for idx, st in reversed(cuts[-400:]):
+        try:
+            out = json.loads(s[:idx] + "".join(reversed(st)))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(out, dict) and out:
+            return out
+    return None
 
 
 def redact(text: str, secrets: list[str | None]) -> str:

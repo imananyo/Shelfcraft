@@ -304,6 +304,36 @@ def test_normalize_copy_coerces_model_output():
     assert c["image_strategy"] == [{"slot": "main", "callouts": ["a", "b"]}] and c["feature_explanations"] == []
 
 
+def test_truncated_json_is_salvaged_and_loops_deduped():
+    from app.ai.base import parse_json_loose
+    from app.services.copywriting import normalize_copy
+
+    # Output cut off by the token cap while the model was looping on keywords.
+    cut = '{"title": "Gold Ring", "bullets": ["A", "B"], "keywords": ["gold", "ring", "gold", "Gold", "rin'
+    d = normalize_copy(parse_json_loose(cut))
+    assert d["title"] == "Gold Ring" and d["bullets"] == ["A", "B"] and d["keywords"] == ["gold", "ring"]
+    assert normalize_copy({"keywords": [f"k{i}" for i in range(500)]})["keywords"] == [f"k{i}" for i in range(40)]
+
+
+def test_listing_copy_retries_when_first_output_is_broken(monkeypatch, client, prod):
+    from app.ai import fallback_manager as fm
+    from app.ai.base import TextResult
+    from app.db.session import session_scope
+    from app.services.copywriting import generate_listing_copy
+
+    outputs = iter(["not json at all", '{"title": "Second try", "bullets": ["x", "y"]}'])
+    calls = []
+
+    def fake(req, **kw):
+        calls.append(req.temperature)
+        return TextResult(text=next(outputs), provider="ollama", model="fake", output_tokens=10)
+
+    monkeypatch.setattr(fm, "generate_text", fake)
+    with session_scope() as db:
+        copy_, prov, _ = generate_listing_copy(db, prod["id"], None, "amazon", {})
+    assert copy_["title"] == "Second try" and calls == [0.6, 0.3]
+
+
 def test_listing_with_string_keywords_is_served_as_list(client, prod):
     from app.db.models import Project
     from app.db.session import session_scope

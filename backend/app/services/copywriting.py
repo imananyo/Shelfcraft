@@ -2,6 +2,7 @@
 and require the model to list its assumptions separately."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -11,6 +12,8 @@ from app.ai.base import TextRequest
 from app.db.models import Brand, Product, ProductResearch
 from app.routers.brands import brand_context
 from app.services.marketplaces import MARKETPLACES, limits
+
+log = logging.getLogger("shelfcraft.copy")
 
 SYSTEM = (
     "You are a senior e-commerce strategist and copywriter. Use ONLY the facts provided. "
@@ -152,12 +155,27 @@ def generate_listing_copy(db: Session, product_id: str, brand_id: str | None, ma
         prompt += f"\n\nCurrent draft (keep consistent with it):\n{current or {}}\n\n{FIELD_PROMPTS[field]}"
         if opts.get("instruction"):
             prompt += f"\nUser instruction for this rewrite: {opts['instruction'][:500]}"
-    res = fm.generate_text(TextRequest(prompt=prompt, system=SYSTEM, json_mode=True, temperature=0.6, max_tokens=3000),
-                           purpose=f"listing_{field or 'copy'}", preferred=provider)
-    data = res.json()
-    if not isinstance(data, dict):
-        raise ValueError("model returned unexpected JSON")
-    return normalize_copy(data), res.provider, res.model
+    # A full listing is ~700-1000 output tokens. Small local models occasionally loop (e.g. endless keyword lists);
+    # the cap stops that early, the parser salvages the cut-off JSON, and one calmer retry covers the rest.
+    required = {"title": ("title",), "bullets": ("bullets",), "description": ("description",),
+                "keywords": ("keywords", "search_terms"), "image_strategy": ("image_strategy",)}.get(field or "", ("title", "bullets"))
+    last_err = "model did not return valid JSON"
+    for attempt, (temp, extra) in enumerate(((0.6, ""), (0.3, "\n\nIMPORTANT: Keep it concise. Never repeat items. "
+                                                             "Return one complete, valid JSON object and nothing else."))):
+        res = fm.generate_text(TextRequest(prompt=prompt + extra, system=SYSTEM, json_mode=True, temperature=temp, max_tokens=1800),
+                               purpose=f"listing_{field or 'copy'}", preferred=provider)
+        try:
+            data = res.json()
+        except ValueError as e:
+            last_err = str(e)
+            log.warning("listing copy attempt %d: unparseable output (%s tokens)", attempt + 1, res.output_tokens)
+            continue
+        data = normalize_copy(data) if isinstance(data, dict) else None
+        if data and all(data.get(k) for k in required):
+            return data, res.provider, res.model
+        last_err = "model returned incomplete copy (missing " + ", ".join(k for k in required if not (data or {}).get(k)) + ")"
+        log.warning("listing copy attempt %d: %s", attempt + 1, last_err)
+    raise ValueError(f"{last_err} after 2 attempts — try again, or add a free hosted provider in Settings for more reliable output")
 
 
 _LIST_FIELDS = ("bullets", "keywords", "benefits", "listing_structure", "creative_recommendations", "assumptions")
@@ -178,12 +196,17 @@ def _as_list(v: Any, field: str) -> list[str]:
     if isinstance(v, str):
         sep = "," if field == "keywords" else "\n"
         parts = v.split(sep) if sep in v else ([v] if field != "keywords" else v.split(","))
-        return [s.strip(" •-*\t") for s in parts if s.strip(" •-*\t")]
-    if isinstance(v, dict):
-        v = list(v.values())
-    if isinstance(v, (list, tuple)):
-        return [t for t in (_as_text(x) for x in v) if t]
-    return [str(v)]
+        items = [s.strip(" •-*\t") for s in parts if s.strip(" •-*\t")]
+    elif isinstance(v, dict):
+        items = [t for t in (_as_text(x) for x in v.values()) if t]
+    elif isinstance(v, (list, tuple)):
+        items = [t for t in (_as_text(x) for x in v) if t]
+    else:
+        items = [str(v)]
+    # Looping models repeat items: drop duplicates (case-insensitive) and cap runaway lists.
+    seen: set[str] = set()
+    out = [t for t in items if not (t.lower() in seen or seen.add(t.lower()))]
+    return out[: 40 if field == "keywords" else 15]
 
 
 def normalize_copy(copy: dict[str, Any] | None) -> dict[str, Any] | None:
