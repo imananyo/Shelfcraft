@@ -16,7 +16,7 @@ import { useApi } from "@/lib/hooks";
 import { cn, timeAgo } from "@/lib/utils";
 
 interface ProjectRow { id: string; name: string; kind: string; thumb_url?: string; document_count: number; updated_at: string }
-const KIND_HREF = (p: ProjectRow) => ({ listing: `/listings/${p.id}`, aplus: `/aplus/${p.id}`, video: `/videos/${p.id}` } as Record<string, string>)[p.kind] ?? `/projects/${p.id}`;
+const KIND_HREF = (p: ProjectRow) => ({ listing: `/listings/${p.id}`, aplus: `/aplus/${p.id}`, video: `/videos/${p.id}`, ads: `/ads/${p.id}`, packaging: `/labs/packaging?project=${p.id}` } as Record<string, string>)[p.kind] ?? `/projects/${p.id}`;
 
 
 function Projects() {

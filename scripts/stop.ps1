@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Gracefully stop Shelfcraft started by scripts\start.ps1. Running jobs are re-queued on next start.
 .DESCRIPTION

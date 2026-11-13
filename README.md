@@ -88,6 +88,19 @@ docs/      reference audit, feature matrix, flows, design system, architecture
 data/      (created at runtime, git-ignored) database, media, models, logs, backups
 ```
 
+## Public API, MCP server and teams
+
+* **Public API:** Settings → *API & MCP* → **Create key**. Then call `http://127.0.0.1:8000/v1/...` (or `http://127.0.0.1:3000/v1/...`)
+  with `Authorization: Bearer sk_shelf_…`. Interactive docs: **http://127.0.0.1:8000/v1/docs**. The app's own `/api` is unchanged.
+* **MCP server** (Claude Desktop, Claude Code, other MCP clients): `backend\mcp_server.py` — Settings → *API & MCP* shows a ready-to-paste config.
+  Example for Claude Code:
+  ```powershell
+  claude mcp add shelfcraft -e SHELFCRAFT_API_KEY=sk_shelf_... -- "C:\Users\<you>\Desktop\shelfcraft\backend\.venv\Scripts\python.exe" "C:\Users\<you>\Desktop\shelfcraft\backend\mcp_server.py"
+  ```
+* **Team members:** Settings → *Team* → enable team mode (creates the owner login), invite teammates (share the link), assign
+  admin / editor / viewer. To let them reach your PC on the same network: `scripts\start.ps1 -Prod -Lan` (refused unless team mode is on).
+* **Amazon import:** Settings → *Integrations* → Amazon Selling Partner API with your own seller credentials. Or paste any listing text in *Add product*.
+
 ## Backups
 
 * **In the app:** Settings → Storage & data → *Create backup now* (ZIP of database + media).

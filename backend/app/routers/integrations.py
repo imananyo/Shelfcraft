@@ -1,7 +1,7 @@
 """Product import: paste-a-listing (free, offline) and the official Amazon Selling Partner API (your own credentials).
 
 Shelfcraft never scrapes Amazon pages. The SP-API connector uses Amazon's official Catalog Items API with
-credentials from YOUR seller account (registration as an SP-API developer is free for sellers). Credentials
+credentials from YOUR seller account (check Amazon's current SP-API developer terms; not verified by Shelfcraft). Credentials
 are stored server-side only and never sent to the browser.
 """
 from __future__ import annotations
@@ -95,7 +95,7 @@ def spapi_status(db: Session = Depends(get_db)) -> dict[str, Any]:
     return {"enabled": row.enabled, "has_client_id": bool(ex.get("client_id")), "has_client_secret": bool(row.api_key),
             "has_refresh_token": bool(ex.get("refresh_token")), "last_error": row.last_error, "last_success_at": row.last_success_at,
             "marketplaces": list(MARKETPLACE_IDS),
-            "note": "Uses Amazon's official Selling Partner API with your own seller credentials. Free for registered sellers; "
+            "note": "Uses Amazon's official Selling Partner API with your own seller credentials (check Amazon's current developer terms). "
                     "Shelfcraft never scrapes Amazon pages."}
 
 

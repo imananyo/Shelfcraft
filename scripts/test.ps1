@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Run all automated tests: backend (pytest), frontend unit (vitest), type-check, lint, and optionally E2E (Playwright).
 .PARAMETER E2E
@@ -8,6 +8,13 @@ param([switch]$E2E)
 $Root = Split-Path -Parent $PSScriptRoot
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
 $failed = @()
+Write-Host "==> PowerShell scripts parse (Windows PowerShell 5.1)" -ForegroundColor Cyan
+foreach ($s in Get-ChildItem (Join-Path $Root "scripts") -Filter *.ps1) {
+  $errs = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($s.FullName, [ref]$null, [ref]$errs)
+  $bytes = [IO.File]::ReadAllBytes($s.FullName)
+  $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+  if ($errs -or -not $bom) { Write-Host "  $($s.Name): $(if ($errs) { $errs[0].Message } else { 'missing UTF-8 BOM (PS 5.1 would misread non-ASCII)' })" -ForegroundColor Red; $failed += "ps1:$($s.Name)" }
+}
 Write-Host "==> Backend tests (pytest)" -ForegroundColor Cyan
 Push-Location (Join-Path $Root "backend"); & .\.venv\Scripts\python.exe -m pytest -q tests; if ($LASTEXITCODE) { $failed += "pytest" }; Pop-Location
 Push-Location (Join-Path $Root "frontend")

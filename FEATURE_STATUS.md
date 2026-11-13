@@ -29,6 +29,33 @@ Legend: ✅ fully implemented · 🟡 implemented with limitations · 🔑 waiti
 | 15 | Export & download center | ✅ | PNG/JPEG/WebP conversion with size presets and max-KB targeting (reports final dimensions & bytes), MP4, project/document JSON, product CSV, listing TXT/CSV/JSON, ZIPs (assets, A+, factory, project). Implemented inside Library, Editor, Listing, A+, Factory, Video rather than one separate page. |
 | 16 | Settings & providers | ✅ | Provider cards (state: available/disabled/not configured/rate-limited/unavailable/blocked), keys (server-side only), models, test connection, last success/error, limits, licenses, privacy; defaults; fallback order; usage table; storage usage; health; backups; display name; access token. |
 
+## Pixii-parity additions (2026-11-13, phase 2)
+
+| Pixii feature | Status | Shelfcraft implementation |
+|---|---|---|
+| Studio / Catalog navigation, Create wizard (Listings · Amazon Ads · A+ · Videos · *or* Deep Strategy), Scale, Playbooks, Labs, Recent work | ✅ | Same information architecture, original Shelfcraft design. |
+| Listings incl. **Amazon Mobile** | ✅ | `amazon_mobile` marketplace (80-char title guidance, mobile-sized visuals). |
+| **Title & Bullets** (single + bulk run) | ✅ | Labs → Title & Bullets; bulk via `/listings/bulk` and Factory "Listing copy" type. |
+| **Packaging Idea Generator** (15 concepts) | ✅ | Up to 15 concepts with palette, materials, structure, front-panel copy; optional AI mock-up render per concept. |
+| **Deep Strategy** | ✅ | Create → Deep Strategy → Product intelligence (personas, gaps, objections, angles). |
+| **Amazon Ads** (Sponsored Brand image/video, Sponsored Products video) + brainstorm/A-B/personas | ✅ | Ads studio: per-persona concepts with hypotheses, render A/B variants as editable creatives; video formats become captioned storyboards. |
+| **A+ Seamless / Separate / Single** (Premium, Basic, Premium Mobile) | ✅ | Seamless = one continuous design exported as consecutive slices. |
+| **Scale → Variant** | 🟡 | Per-variant runs with a non-AI hue shift. Changing size/flavor visually isn't automated. |
+| **Scale → Translate** (1-click new market) | ✅ | New listing in the target language, including text inside images (re-rendered). |
+| **Scale → Different Product** | ✅ | Apply finished designs to other products (photos, name, features, benefits swapped; layout kept). |
+| **Scale → Steal the Look** | ✅ | Inspire (layout/palette/hierarchy analysis → new original layout). |
+| **Playbooks** + template library + import | ✅ | 5 original templates (main image set, lifestyle trio, social/UGC-style kit, furniture lifestyle, full launch kit); edit steps; run on many products. |
+| **Turn any image into editable layers** | ✅ / 🟡 | OCR (RapidOCR) → real text layers, subject cut-out, LaMa-rebuilt background. Fonts are approximated (Inter). |
+| **Listing Grader** | ✅ | Transparent rule-based score + optional AI review; works on pasted listings or your own. |
+| **Public API** | ✅ | `/v1` with API keys (hashed, scopes, 120 req/min), docs at `/v1/docs`. Local `/api` unchanged. |
+| **MCP server** | ✅ | `backend/mcp_server.py` (12 tools) over the public API. |
+| **Team / Invite members** | ✅ | Optional team mode: owner, invites (links), admin/editor/viewer roles, sign-in; `start.ps1 -Lan` for network access (only with team mode). |
+| **ASIN import** | 🟡 | Official **Amazon SP-API** connector with *your* seller credentials (not live-tested: needs your account) + free **paste-a-listing** import. No scraping. |
+| **Talking UGC (avatar) video** | 🟡 | **Voiceover video**: AI script + offline Windows voice + captions, no on-screen person (an avatar needs paid/GPU models). |
+| **360° rotating video** | 🟡 | **360° spin from your angle photos** (real photos, FFmpeg). Not generated from a single image. |
+| Reading reviews / top-5% of category automatically, "trained on 100K listings" | ❌ | Requires scraping + proprietary data. Paste reviews/competitor notes instead. |
+| Plans, credits, billing | ❌ (by design) | Everything is free/local. |
+
 ## Infrastructure
 
 | Item | Status | Notes |

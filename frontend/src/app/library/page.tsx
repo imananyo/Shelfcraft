@@ -1,16 +1,17 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Check, Download, FileArchive, Folder, FolderPlus, Heart, Library, PenLine, Search, Sparkles, Tag, Trash2, Upload, WandSparkles, X,
+  Check, Download, FileArchive, Folder, FolderPlus, Heart, Layers, Library, PenLine, Search, Sparkles, Tag, Trash2, Upload, WandSparkles, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { JobCard } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Dropzone } from "@/components/ui/dropzone";
 import { Field, Input, Select } from "@/components/ui/form";
-import { Badge, Card, EmptyState, ErrorState, PageHeader, ProviderBadge, Skeleton } from "@/components/ui/misc";
+import { Badge, Card, EmptyState, ErrorState, Notice, PageHeader, ProviderBadge, Skeleton } from "@/components/ui/misc";
 import { Confirm, Dialog } from "@/components/ui/overlay";
 import { del, download, patch, post, upload } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
@@ -59,6 +60,7 @@ function LibraryInner() {
       <PageHeader title="Asset library" description={list.data ? `${list.data.total} assets · uploads, generated creatives, edits, videos and exports` : "All your files in one place"}
         actions={<><Button onClick={() => document.getElementById("lib-upload")?.click()} loading={uploading}><Upload />Upload</Button>
           <input id="lib-upload" type="file" multiple className="hidden" accept="image/*,video/mp4,audio/*,.pdf,.txt,.md" onChange={(e) => { const f = Array.from(e.target.files ?? []); if (f.length) onFiles(f); e.target.value = ""; }} /></>} />
+      {sp.get("decompose") === "1" && <Notice className="mb-4" icon={<Layers />}><b>Image → Layers:</b> click any image, then <b>Split into layers</b>. Shelfcraft reads the text (OCR), cuts out the subject and rebuilds the background — you get an editable design.</Notice>}
       <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
         <aside className="flex flex-col gap-1 lg:sticky lg:top-0 lg:self-start">
           {[["", "All assets"], ["none", "Unfiled"]].map(([id, label]) => (
@@ -169,6 +171,7 @@ function AssetDrawer({ id, onClose, onChange, folders }: { id: string; onClose: 
               <Button variant={a.favorite ? "primary" : "outline"} size="sm" onClick={() => save({ favorite: !a.favorite })}><Heart className={a.favorite ? "fill-current" : ""} />{a.favorite ? "Favorited" : "Favorite"}</Button>
               <Button variant="outline" size="sm" onClick={() => download(`/assets/${a.id}/file?download=true`, {}, a.filename)}><Download />Original</Button>
               {a.kind === "image" && <Link href={`/edit?asset=${a.id}`}><Button variant="outline" size="sm"><WandSparkles />Spot edit</Button></Link>}
+              {a.kind === "image" && <SplitLayers assetId={a.id} />}
               {typeof a.meta_full?.document_id === "string" && <Link href={`/editor/${a.meta_full.document_id}`}><Button variant="outline" size="sm"><PenLine />Edit layers</Button></Link>}
               {typeof a.meta_full?.parent_asset_id === "string" && <Link href={`/library?asset=${a.meta_full.parent_asset_id}`}><Button variant="ghost" size="sm">View original</Button></Link>}
             </div>
@@ -194,6 +197,17 @@ function AssetDrawer({ id, onClose, onChange, folders }: { id: string; onClose: 
       </div>
       <Confirm open={confirm} onOpenChange={setConfirm} title="Delete this asset?" onConfirm={async () => { await del(`/assets/${id}`); onChange(); onClose(); }} />
     </div>
+  );
+}
+
+function SplitLayers({ assetId }: { assetId: string }) {
+  const [jobId, setJobId] = React.useState<string | null>(null);
+  const router = useRouter();
+  if (jobId) return <div className="w-full"><JobCard jobId={jobId} compact title="Splitting into layers (OCR + cut-out)" onDone={(j) => router.push(`/editor/${j.result?.document_id}`)} /></div>;
+  return (
+    <Button variant="outline" size="sm" onClick={async () => { try { setJobId((await post<{ id: string }>(`/assets/${assetId}/decompose`)).id); } catch (e) { toast.error((e as Error).message); } }}>
+      <Layers />Split into layers
+    </Button>
   );
 }
 

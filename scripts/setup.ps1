@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   One-time setup for Shelfcraft on Windows: Python 3.12 venv, backend deps, frontend deps, .env.
 .DESCRIPTION

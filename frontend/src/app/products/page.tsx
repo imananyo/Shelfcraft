@@ -1,6 +1,6 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { Download, FileSpreadsheet, Globe, LayoutGrid, List, Package, Plus, Search, Upload } from "lucide-react";
+import { ClipboardPaste, Download, FileSpreadsheet, Globe, LayoutGrid, List, Package, Plus, Search, ShoppingBag, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -147,6 +147,7 @@ function AddProductDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               <Button variant="outline" onClick={fetchUrl} loading={fetching} disabled={!url.trim()}>Fetch</Button>
             </div>
           </Field>
+          <ImportOptions onImported={(id) => { qc.invalidateQueries({ queryKey: ["products"] }); onOpenChange(false); router.push(`/products/${id}`); }} />
           <div className="flex items-center gap-3 text-xs text-muted"><div className="h-px flex-1 bg-border" />or<div className="h-px flex-1 bg-border" /></div>
           <Button variant="secondary" size="lg" onClick={() => setStep("details")}><Plus />Enter details manually</Button>
         </div>
@@ -167,6 +168,49 @@ function AddProductDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         </div>
       )}
     </Dialog>
+  );
+}
+
+function ImportOptions({ onImported }: { onImported: (id: string) => void }) {
+  const amazon = useApi<{ enabled: boolean }>(["spapi"], "/integrations/amazon");
+  const [mode, setMode] = React.useState<"" | "paste" | "asin">("");
+  const [text, setText] = React.useState("");
+  const [asin, setAsin] = React.useState("");
+  const [country, setCountry] = React.useState("US");
+  const [busy, setBusy] = React.useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const p = mode === "paste"
+        ? await post<Product & { note: string }>("/products/import-text", { text })
+        : await post<Product & { images_imported: number }>("/integrations/amazon/import", { asin: asin.trim().toUpperCase(), country });
+      toast.success(mode === "paste" ? "Product created from pasted text — review the fields and add photos" : "Imported from Amazon");
+      onImported(p.id);
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant={mode === "paste" ? "primary" : "outline"} onClick={() => setMode(mode === "paste" ? "" : "paste")}><ClipboardPaste />Paste a listing</Button>
+        <Button variant={mode === "asin" ? "primary" : "outline"} onClick={() => setMode(mode === "asin" ? "" : "asin")}><ShoppingBag />Import by ASIN</Button>
+      </div>
+      {mode === "paste" && (
+        <div className="flex flex-col gap-2">
+          <Textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"Paste a product title, bullet points and description (from your store, a supplier sheet, or a listing you manage)…"} />
+          <Button onClick={run} loading={busy} disabled={text.trim().length < 10}>Create product from text</Button>
+          <p className="text-[11px] text-muted">Parsed on this computer without AI — title, bullets, specs (e.g. “Material: Bamboo”) and price.</p>
+        </div>
+      )}
+      {mode === "asin" && (amazon.data?.enabled ? (
+        <div className="flex gap-2">
+          <Input value={asin} onChange={(e) => setAsin(e.target.value)} placeholder="ASIN, e.g. B0XXXXXXXX" className="flex-1" />
+          <Select value={country} onChange={(e) => setCountry(e.target.value)} className="w-20" aria-label="Marketplace">{["US", "CA", "MX", "UK", "DE", "FR", "IT", "ES", "IN", "AE", "JP", "AU"].map((c) => <option key={c}>{c}</option>)}</Select>
+          <Button onClick={run} loading={busy} disabled={!/^[A-Za-z0-9]{10}$/.test(asin.trim())}>Import</Button>
+        </div>
+      ) : (
+        <Notice tone="warning" className="text-[12.5px]">ASIN import uses Amazon&apos;s official Selling Partner API with <b>your own</b> seller credentials. Set it up in <Link className="underline" href="/settings?tab=integrations">Settings → Integrations</Link>. Shelfcraft never scrapes Amazon pages — or use <b>Paste a listing</b>.</Notice>
+      ))}
+    </div>
   );
 }
 

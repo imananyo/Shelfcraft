@@ -23,8 +23,9 @@ function NewAplus() {
   const [name, setName] = React.useState("A+ layout");
   const [productId, setProductId] = React.useState(sp.get("product") ?? "");
   const [brandId, setBrandId] = React.useState("");
-  const [tier, setTier] = React.useState<"basic" | "premium" | "mobile">("premium");
-  const [mods, setMods] = React.useState<string[]>(["hero_banner", "feature_row", "comparison", "brand_story"]);
+  const [tier, setTier] = React.useState<"basic" | "premium" | "mobile">((["basic", "premium", "mobile"].includes(sp.get("tier") ?? "") ? sp.get("tier") : "premium") as "premium");
+  const mode = sp.get("mode");
+  const [mods, setMods] = React.useState<string[]>(mode === "seamless" ? ["seamless"] : mode === "single" ? ["hero_banner"] : ["hero_banner", "feature_row", "comparison", "brand_story"]);
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => { if (brand && !brandId) setBrandId(brand.id); }, [brand, brandId]);
   const toggle = (k: string) => setMods((m) => (m.includes(k) ? m.filter((x) => x !== k) : m.length >= 7 ? m : [...m, k]));

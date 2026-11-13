@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Restore a Shelfcraft backup ZIP. Stop Shelfcraft first (scripts\stop.ps1).
 .DESCRIPTION

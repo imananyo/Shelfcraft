@@ -6,7 +6,11 @@ const API_ORIGIN = process.env.SHELFCRAFT_API_ORIGIN ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
   async rewrites() {
-    return [{ source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` }];
+    return [
+      { source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` },
+      // Public API v1 (API-key authenticated) and its docs.
+      { source: "/v1/:path*", destination: `${API_ORIGIN}/v1/:path*` },
+    ];
   },
   async headers() {
     return [

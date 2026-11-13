@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Optional: install local CPU image generation (PyTorch CPU + diffusers) and pre-download SD-Turbo.
 .DESCRIPTION

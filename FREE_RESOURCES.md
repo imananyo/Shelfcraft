@@ -19,6 +19,15 @@ verified (`free_tier_verified=False` cannot be enabled) and never purchases cred
 | **Mistral** | (adapter only) | Hosted | ❌ **Not verified** — [usage-limits docs](https://docs.mistral.ai/admin/billing-usage/usage-limits) say API keys need billing activation | — | Blocked in UI and API | — | Free-tier training policy unclear |
 | Cohere / trial-credit services | — | — | ❌ Trial/evaluation only — not integrated | — | — | — | — |
 
+## Added in phase 2
+
+| Component | What it does | Local / hosted | Free? | License | Privacy |
+|---|---|---|---|---|---|
+| **RapidOCR** (`rapidocr-onnxruntime`, PaddleOCR models in ONNX) | Reads text for *Image → Layers* | Local (CPU) | ✅ | Apache-2.0 | Local |
+| **Windows SAPI voices** via `pyttsx3` | Offline voiceover narration | Local | ✅ built into Windows (voices found here: Microsoft David, Zira) | pyttsx3 MPL-2.0; voices per Windows license | Local |
+| **MCP Python SDK** (`mcp` 2.x) | MCP server for AI assistants | Local | ✅ | MIT | Local (talks to your Shelfcraft only) |
+| **Amazon Selling Partner API** (Catalog Items) | Optional ASIN import of *your* listings | Hosted (Amazon) | ⚠️ **Not verified in this build** — believed to be no-cost for sellers using their own data, but check Amazon's current SP-API developer terms before enabling. Off by default; requires your own developer registration. | Amazon SP-API terms | Sends ASIN + your credentials to Amazon only |
+
 ## Non-AI open-source components
 
 | Component | Purpose | License |

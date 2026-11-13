@@ -12,6 +12,7 @@ import { download, get, patch, post } from "@/lib/api";
 import { useApi, useProviders, useSettings } from "@/lib/hooks";
 import type { ProviderStatus } from "@/lib/types";
 import { formatBytes, timeAgo } from "@/lib/utils";
+import { ApiTab, IntegrationsTab, TeamTab } from "./settings-extra";
 
 const STATE: Record<ProviderStatus["state"], { tone: "success" | "neutral" | "warning" | "danger"; label: string }> = {
   available: { tone: "success", label: "Available" }, disabled: { tone: "neutral", label: "Disabled" }, not_configured: { tone: "warning", label: "Not configured" },
@@ -24,10 +25,13 @@ function SettingsInner() {
   return (
     <>
       <PageHeader title="Settings" description="Everything runs locally. Hosted AI providers are optional, free-tier only, and never billed." />
-      <Tabs value={tab} onValueChange={setTab} tabs={[{ value: "providers", label: "AI providers" }, { value: "defaults", label: "Generation defaults" }, { value: "usage", label: "Usage" }, { value: "data", label: "Storage & data" }, { value: "prefs", label: "Preferences" }]}>
+      <Tabs value={tab} onValueChange={setTab} tabs={[{ value: "providers", label: "AI providers" }, { value: "defaults", label: "Generation defaults" }, { value: "usage", label: "Usage" }, { value: "team", label: "Team" }, { value: "api", label: "API & MCP" }, { value: "integrations", label: "Integrations" }, { value: "data", label: "Storage & data" }, { value: "prefs", label: "Preferences" }]}>
         <TabPanel value="providers"><Providers /></TabPanel>
         <TabPanel value="defaults"><Defaults /></TabPanel>
         <TabPanel value="usage"><Usage /></TabPanel>
+        <TabPanel value="team"><TeamTab /></TabPanel>
+        <TabPanel value="api"><ApiTab /></TabPanel>
+        <TabPanel value="integrations"><IntegrationsTab /></TabPanel>
         <TabPanel value="data"><Data /></TabPanel>
         <TabPanel value="prefs"><Prefs /></TabPanel>
       </Tabs>

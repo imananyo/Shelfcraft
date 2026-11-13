@@ -1,5 +1,6 @@
 "use client";
 import { Check, Download, Factory, Play, RefreshCw, Square, TriangleAlert } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 import { JobStatusBadge } from "@/components/shell/app-shell";
@@ -13,24 +14,25 @@ import type { Job, Product } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/utils";
 
 interface Batch { id: string; name: string; total: number; counts: Record<string, number>; progress?: number; created_at: string; jobs?: Job[] }
-const TYPES = [["white_bg_main", "Main (white)"], ["lifestyle", "Lifestyle"], ["hero", "Hero"], ["feature", "Feature callouts"], ["comparison", "Comparison"],
+const TYPES = [["listing_copy", "Listing copy (text)"], ["white_bg_main", "Main (white)"], ["lifestyle", "Lifestyle"], ["hero", "Hero"], ["feature", "Feature callouts"], ["comparison", "Comparison"],
   ["dimensions", "Dimensions"], ["steps", "How-to steps"], ["social", "Social 4:5"], ["ad_sb", "Sponsored Brand"], ["lifestyle_headline", "Lifestyle + headline"]];
 
-export default function FactoryPage() {
+function FactoryInner() {
+  const sp = useSearchParams();
   const { brand } = useActiveBrand();
   const products = useApi<{ items: Product[] }>(["products", "factory"], "/products?limit=500&sort=name");
   const templates = useApi<{ id: string; name: string }[]>(["templates"], "/templates");
   const batches = useApi<Batch[]>(["factory-batches"], "/factory/batches", { refetchInterval: 4000 });
   const [selected, setSelected] = React.useState<string[]>([]);
   const [types, setTypes] = React.useState<string[]>(["white_bg_main", "feature"]);
-  const [variants, setVariants] = React.useState(false);
+  const [variants, setVariants] = React.useState(sp.get("variants") === "1");
   const [brandId, setBrandId] = React.useState("");
   const [templateId, setTemplateId] = React.useState("");
   const [style, setStyle] = React.useState("minimal");
   const [prompt, setPrompt] = React.useState("");
   const [name, setName] = React.useState("Factory run");
   const [preview, setPreview] = React.useState<{ count: number; estimated_minutes: number; warnings: string[]; limit: number } | null>(null);
-  const [active, setActive] = React.useState<string | null>(null);
+  const [active, setActive] = React.useState<string | null>(sp.get("run"));
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => { if (brand && !brandId) setBrandId(brand.id); }, [brand, brandId]);
   const body = { name, product_ids: selected, include_variants: variants, creative_types: types, brand_id: brandId || null, template_id: templateId || null, style, prompt };
@@ -154,4 +156,8 @@ function BatchDetail({ id }: { id: string }) {
       </div>
     </Card>
   );
+}
+
+export default function Page() {
+  return <React.Suspense><FactoryInner /></React.Suspense>;
 }

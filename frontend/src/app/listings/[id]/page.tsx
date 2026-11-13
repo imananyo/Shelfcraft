@@ -1,6 +1,6 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, History, Images, Info, RefreshCw, Save, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { Copy, Download, Gauge, History, Images, Info, Languages, RefreshCw, Save, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -96,6 +96,8 @@ function ListingInner() {
           <Menu trigger={<Button variant="outline"><Download />Export</Button>}>
             {(["txt", "csv", "json"] as const).map((f) => <MenuItem key={f} onSelect={() => download(`/listings/${id}/export?format=${f}`)}>{f.toUpperCase()}</MenuItem>)}
           </Menu>
+          <Link href={`/grader?listing=${id}`}><Button variant="outline" disabled={!L.copy}><Gauge />Grade</Button></Link>
+          <TranslateButton id={id} disabled={!L.copy} />
           <Versions id={id} count={L.versions} onRestore={() => { setDirty(false); refresh(); }} />
           <Button onClick={() => save(false)} loading={saving} disabled={!dirty}><Save />Save</Button>
           <Button variant="ghost" size="icon" aria-label="Delete listing" onClick={() => setConfirmDel(true)}><Trash2 /></Button>
@@ -168,6 +170,30 @@ function ListingInner() {
       <Confirm open={confirmDel} onOpenChange={setConfirmDel} title="Delete this listing?" body="Generated images stay in your asset library."
         onConfirm={async () => { await del(`/listings/${id}`); qc.invalidateQueries({ queryKey: ["listings"] }); router.push("/listings"); }} />
     </>
+  );
+}
+
+function TranslateButton({ id, disabled }: { id: string; disabled?: boolean }) {
+  const langs = useApi<Record<string, string>>(["languages"], "/languages");
+  const [lang, setLang] = React.useState("de");
+  const [country, setCountry] = React.useState("DE");
+  const [images, setImages] = React.useState(true);
+  const [jobId, setJobId] = React.useState<string | null>(null);
+  const router = useRouter();
+  return (
+    <Popover className="w-80 p-3" trigger={<Button variant="outline" disabled={disabled}><Languages />Translate</Button>}>
+      <div className="flex flex-col gap-2.5">
+        <div className="text-[13px] font-medium">Adapt for a new market</div>
+        <div className="grid grid-cols-2 gap-2">
+          <Select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language">{langs.data && Object.entries(langs.data).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+          <Select value={country} onChange={(e) => setCountry(e.target.value)} aria-label="Country">{["US", "UK", "DE", "FR", "ES", "IT", "NL", "PL", "SE", "TR", "AE", "IN", "JP", "MX", "CA", "AU"].map((c) => <option key={c}>{c}</option>)}</Select>
+        </div>
+        <label className="flex items-center gap-2 text-[12.5px]"><input type="checkbox" checked={images} onChange={(e) => setImages(e.target.checked)} />Also translate text inside the images</label>
+        {jobId ? <JobCard jobId={jobId} compact title="Translating" onDone={(j) => { setJobId(null); router.push(`/listings/${j.result?.project_id}`); }} />
+          : <Button size="sm" onClick={async () => { try { const j = await post<Job>(`/listings/${id}/translate`, { language: lang, country, translate_images: images }); setJobId(j.id); } catch (e) { toast.error((e as Error).message); } }}><Languages />Translate listing</Button>}
+        <p className="text-[11px] text-muted">Creates a new listing; this one stays unchanged.</p>
+      </div>
+    </Popover>
   );
 }
 

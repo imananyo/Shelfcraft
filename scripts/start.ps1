@@ -1,13 +1,17 @@
-<#
+﻿<#
 .SYNOPSIS
   Start Shelfcraft (backend API + web app) and open it in your browser.
 .PARAMETER Prod
   Build and run the optimized production web app (faster UI; first build takes ~1–2 min).
+.PARAMETER Lan
+  Let other devices on your network use Shelfcraft (for team members). Only allowed when team mode is
+  enabled (Settings → Team), so every request requires a sign-in or an API key.
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\start.ps1
   powershell -ExecutionPolicy Bypass -File scripts\start.ps1 -Prod
+  powershell -ExecutionPolicy Bypass -File scripts\start.ps1 -Prod -Lan
 #>
-param([switch]$Prod, [int]$ApiPort = 8000, [int]$WebPort = 3000, [switch]$NoBrowser)
+param([switch]$Prod, [int]$ApiPort = 8000, [int]$WebPort = 3000, [switch]$NoBrowser, [switch]$Lan)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
@@ -33,12 +37,21 @@ $api = Start-Process $py -ArgumentList "-m","uvicorn","app.main:app","--host","1
 
 $web = Join-Path $Root "frontend"
 $env:SHELFCRAFT_API_ORIGIN = "http://127.0.0.1:$ApiPort"
+$webHost = "127.0.0.1"
+if ($Lan) {
+  # The API itself always stays on 127.0.0.1; only the web app (which proxies /api and /v1) is opened to the LAN,
+  # and only when team mode guarantees every request is authenticated.
+  $ready = $false
+  for ($i = 0; $i -lt 60; $i++) { Start-Sleep 1; try { $st = Invoke-RestMethod "http://127.0.0.1:$ApiPort/api/auth/status" -TimeoutSec 3; $ready = $true; break } catch {} }
+  if ($ready -and $st.team_mode) { $webHost = "0.0.0.0"; Write-Host "LAN access enabled (team mode is on)." -ForegroundColor Yellow }
+  else { Write-Warning "LAN access refused: enable team mode first (Settings → Team). Starting on this computer only." }
+}
 if ($Prod) {
   Write-Host "Building web app (production)..." -ForegroundColor Cyan
   Push-Location $web; npm run build; if ($LASTEXITCODE -ne 0) { Pop-Location; Stop-Process $api.Id; throw "Build failed" }; Pop-Location
-  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run start -- -p $WebPort -H 127.0.0.1 > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
+  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run start -- -p $WebPort -H $webHost > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
 } else {
-  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run dev -- -p $WebPort -H 127.0.0.1 > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
+  $webProc = Start-Process "cmd.exe" -ArgumentList "/c","npm run dev -- -p $WebPort -H $webHost > `"$logs\web.log`" 2>&1" -WorkingDirectory $web -WindowStyle Minimized -PassThru
 }
 @{ api = $api.Id; web = $webProc.Id } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $Root "data\.pids.json")
 
@@ -50,5 +63,9 @@ for ($i = 0; $i -lt 90; $i++) {
 }
 if (-not $ok) { Write-Warning "Services didn't respond in time. Check data\logs\api-stderr.log and data\logs\web.log"; exit 1 }
 Write-Host "Shelfcraft is running: http://127.0.0.1:$WebPort   (API health: $($h.status))" -ForegroundColor Green
+if ($webHost -eq "0.0.0.0") {
+  $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress
+  Write-Host "Teammates on your network: http://${ip}:$WebPort  (Windows Firewall may ask to allow Node.js — allow on Private networks only)" -ForegroundColor Yellow
+}
 Write-Host "Stop it with: powershell -ExecutionPolicy Bypass -File scripts\stop.ps1"
 if (-not $NoBrowser) { Start-Process "http://127.0.0.1:$WebPort" }

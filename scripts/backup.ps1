@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Create a backup ZIP (database + media). Works whether or not Shelfcraft is running.
 .EXAMPLE

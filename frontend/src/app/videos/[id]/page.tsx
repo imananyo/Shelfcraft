@@ -3,14 +3,14 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
-import { Clapperboard, Download, GripVertical, Music, Pause, Play, Plus, Trash2, X } from "lucide-react";
+import { Clapperboard, Download, GripVertical, Mic, Music, Pause, Play, Plus, Sparkles, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 import { AssetPicker, JobCard } from "@/components/shared";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Slider } from "@/components/ui/form";
+import { Field, Input, Select, Slider, Textarea } from "@/components/ui/form";
 import { Badge, Card, EmptyState, ErrorState, Notice, PageHeader, Skeleton } from "@/components/ui/misc";
 import { Confirm } from "@/components/ui/overlay";
 import { del, download, patch, post } from "@/lib/api";
@@ -73,8 +73,53 @@ function Preview({ v, scenes }: { v: Video; scenes: Scene[] }) {
   );
 }
 
+function VoiceoverPanel({ videoId, scenes, open, onJob, existing }: { videoId: string; scenes: number; open: boolean; onJob: (id: string) => void; existing?: string[] }) {
+  const voices = useApi<string[]>(["voices"], "/voices");
+  const [voice, setVoice] = React.useState("");
+  const [rate, setRate] = React.useState(175);
+  const [mode, setMode] = React.useState<"ai" | "own">(existing?.length ? "own" : "ai");
+  const [script, setScript] = React.useState((existing ?? []).join("\n"));
+  const [show, setShow] = React.useState(open);
+  const lines = script.split("\n").map((s) => s.trim()).filter(Boolean);
+  const start = async () => {
+    try {
+      const j = await post<Job>(`/videos/${videoId}/voiceover`, { voice, rate, script: mode === "own" ? lines : null });
+      onJob(j.id);
+      toast.success("Recording voiceover and rendering…");
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  if (!show) return <Button variant="outline" className="mt-6" onClick={() => setShow(true)}><Mic />Add AI voiceover</Button>;
+  return (
+    <Card className="mt-6 flex flex-col gap-4 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div><h3 className="flex items-center gap-2 text-[15px] font-semibold"><Mic className="size-4 text-ai" />Voiceover video</h3>
+          <p className="text-[12.5px] text-muted">Creator-style video: a short script read by an offline Windows voice, with captions. Each scene lasts as long as its line. No on-screen avatar.</p></div>
+        <Badge>offline · free</Badge>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Voice"><Select value={voice} onChange={(e) => setVoice(e.target.value)}><option value="">Default</option>{voices.data?.map((v) => <option key={v} value={v.split(" ")[1] ?? v}>{v}</option>)}</Select></Field>
+        <Field label={`Speed ${rate} wpm`}><Slider min={130} max={220} step={5} value={rate} onChange={setRate} /></Field>
+        <Field label="Script">
+          <div className="flex rounded-[10px] border border-border-strong p-0.5 text-[12.5px]">
+            <button onClick={() => setMode("ai")} className={cn("flex-1 rounded-[8px] py-1.5", mode === "ai" && "bg-ai-soft text-ai")}>AI writes it</button>
+            <button onClick={() => setMode("own")} className={cn("flex-1 rounded-[8px] py-1.5", mode === "own" && "bg-sunken")}>I&apos;ll write it</button>
+          </div>
+        </Field>
+      </div>
+      {mode === "own" && (
+        <Field label={`One line per scene (${lines.length}/${scenes})`} hint="Short spoken sentences work best (about 8–14 words).">
+          <Textarea rows={Math.max(4, scenes)} value={script} onChange={(e) => setScript(e.target.value)} placeholder={"Meet the bottle that keeps up with you.\nCold for 24 hours, hot for 12.\n…"} />
+        </Field>
+      )}
+      {(voices.data?.length ?? 1) === 0 && <Notice tone="warning">No Windows voices were found. Install one in Windows Settings → Time & language → Speech.</Notice>}
+      <div className="flex justify-end"><Button variant="ai" onClick={start} disabled={!scenes || (mode === "own" && !lines.length)}><Sparkles />Create voiceover video</Button></div>
+    </Card>
+  );
+}
+
 export default function VideoPage() {
   const { id } = useParams<{ id: string }>();
+  const sp = useSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
   const q = useApi<Video>(["video", id], `/videos/${id}`);
@@ -183,6 +228,7 @@ export default function VideoPage() {
           </Card>
         </div>
       </div>
+      <VoiceoverPanel videoId={id} scenes={scenes.length} open={sp.get("voiceover") === "1"} onJob={setJobId} existing={(v as unknown as { voiceover_script?: string[] }).voiceover_script} />
       <AssetPicker open={picker} onOpenChange={setPicker} title="Add a scene" onPick={(a) => saveScenes([...scenes, { id: uid(10), asset_id: a.id, duration: 3, text: "", text_position: "bottom", motion: scenes.length % 2 ? "zoom_out" : "zoom_in", thumb_url: a.thumb_url }])} />
       <AssetPicker open={musicPicker} onOpenChange={setMusicPicker} kind="audio" title="Choose background music" onPick={(a) => setting({ music_asset_id: a.id })} />
       <Confirm open={confirm} onOpenChange={setConfirm} title="Delete this video project?" body="Rendered MP4s stay in your asset library." onConfirm={async () => { await del(`/videos/${id}`); router.push("/videos"); }} />

@@ -101,3 +101,29 @@ test("new listing: add a product inline and it is auto-selected", async ({ page 
   const select = page.getByRole("combobox", { name: "Product" });
   await expect(select.locator("option:checked")).toHaveText(`Inline Product ${stamp}`);
 });
+test("listing grader: paste a listing and get a score with fixes", async ({ page }) => {
+  await page.goto("/grader");
+  await page.locator("textarea").first().fill("BEST SALE water bottle");
+  await page.getByRole("button", { name: "Grade listing" }).click();
+  await expect(page.getByText(/^Grade [A-F]$/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Top fixes" })).toBeVisible();
+});
+
+test("playbooks: import a template and see its steps", async ({ page }) => {
+  await page.goto("/playbooks");
+  await page.getByRole("button", { name: "Playbook templates" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.locator("div").filter({ hasText: /^Lifestyle trio/ }).first().waitFor();
+  await dialog.getByRole("button", { name: "Import" }).nth(1).click();
+  await expect(page).toHaveURL(/\/playbooks\/[a-f0-9]{32}/);
+  await expect(page.getByRole("heading", { name: /Steps \(\d+\)/ })).toBeVisible();
+});
+
+test("api keys: create a key, call the public API, revoke it", async ({ page, request }) => {
+  await page.goto("/settings?tab=api");
+  await page.getByRole("button", { name: "Create key" }).click();
+  const key = (await page.locator("code").filter({ hasText: /^sk_shelf_/ }).first().textContent())!.trim();
+  const ok = await request.get("/v1/products", { headers: { Authorization: `Bearer ${key}` } });
+  expect(ok.status()).toBe(200);
+  expect((await request.get("/v1/products")).status()).toBe(401);
+});

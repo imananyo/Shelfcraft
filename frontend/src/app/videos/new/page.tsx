@@ -23,14 +23,15 @@ function NewVideo() {
   const router = useRouter();
   const [name, setName] = React.useState("Product video");
   const [productId, setProductId] = React.useState(sp.get("product") ?? "");
-  const [aspect, setAspect] = React.useState("16:9");
+  const [aspect, setAspect] = React.useState(["16:9", "9:16", "1:1", "4:5"].includes(sp.get("aspect") ?? "") ? sp.get("aspect")! : "16:9");
+  const voiceover = sp.get("mode") === "voiceover";
   const [duration, setDuration] = React.useState(15);
   const [busy, setBusy] = React.useState(false);
   const create = async () => {
     setBusy(true);
     try {
       const r = await post<{ id: string }>("/videos", { name, product_id: productId || null, aspect, target_duration: duration });
-      router.push(`/videos/${r.id}`);
+      router.push(`/videos/${r.id}${voiceover ? "?voiceover=1" : ""}`);
     } catch (e) { toast.error((e as Error).message); setBusy(false); }
   };
   return (
@@ -43,7 +44,9 @@ function NewVideo() {
           <Field label="Product" hint="Photos & creatives become scenes" aside={<QuickAddProduct label="New" onCreated={setProductId} />}><ProductSelect value={productId} onChange={setProductId} allowNone /></Field>
           <Field label="Target duration"><Select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>{[6, 10, 15, 20, 30, 45, 60].map((s) => <option key={s} value={s}>{s} seconds</option>)}</Select></Field>
         </Card>
-        <Notice>Talking-avatar UGC and 360° spins need generative video models that don&apos;t run on this computer for free — they&apos;re not offered rather than faked.</Notice>
+        <Notice>{voiceover
+          ? "Next you'll write (or AI-generate) a short script; an offline Windows voice reads it over your scenes with captions. There's no on-screen avatar — that needs a paid or GPU-only model."
+          : <>Want a creator-style video? Choose <b>Voiceover video</b> on the Create page. For a turntable, use <Link className="underline" href="/videos/spin">360° spin</Link>.</>}</Notice>
         <div className="flex justify-end gap-2"><Link href="/videos"><Button variant="ghost">Cancel</Button></Link><Button size="lg" onClick={create} loading={busy}>Create storyboard</Button></div>
       </div>
     </div>

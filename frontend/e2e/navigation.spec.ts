@@ -5,6 +5,9 @@ const ROUTES: [string, RegExp][] = [
   ["/studio", /Image studio/], ["/edit", /Spot edit/], ["/aplus", /A\+ content/], ["/videos", /Video creator/],
   ["/inspire", /Inspire/], ["/factory", /Factory/], ["/projects", /Designs & projects/], ["/library", /Asset library/],
   ["/jobs", /Jobs/], ["/brands", /Brands/], ["/products", /Products/], ["/settings", /Settings/],
+  ["/scale", /Scale/], ["/playbooks", /Playbooks/], ["/labs", /Labs/], ["/labs/title-bullets", /Title & Bullets/],
+  ["/labs/packaging", /Packaging Idea Generator/], ["/grader", /Listing grader/], ["/ads", /Ads studio/], ["/ads/new", /New ad set/],
+  ["/sessions", /Recent work/], ["/videos/spin", /360° spin/],
 ];
 
 test("every main page renders without runtime errors", async ({ page }) => {
@@ -33,6 +36,8 @@ test("sidebar links all resolve (no dead navigation)", async ({ page, request })
 
 test("search palette opens with Ctrl+K and navigates", async ({ page }) => {
   await page.goto("/");
+  // The app renders client-side after mount; wait for the shell before using its keyboard shortcut.
+  await page.locator('nav[aria-label="Main"]').waitFor({ state: "visible" });
   await page.keyboard.press("Control+k");
   await page.getByPlaceholder(/Search products/).fill("Settings");
   await page.keyboard.press("Enter");

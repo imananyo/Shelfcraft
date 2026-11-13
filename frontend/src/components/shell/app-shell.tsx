@@ -13,6 +13,7 @@ import { post } from "@/lib/api";
 import { activateBrand, useActiveBrand, useApi, useSettings } from "@/lib/hooks";
 import type { Job } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/utils";
+import { AuthGate, useAuth } from "./auth-gate";
 import { LogoMark } from "./logo";
 import { ALL_NAV, NAV } from "./nav";
 
@@ -49,7 +50,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const fullBleed = FULL_BLEED.some((p) => pathname.startsWith(p));
+  if (pathname.startsWith("/join")) return <>{children}</>;
   return (
+    <AuthGate>
     <div className="flex h-full">
       {mobileOpen && <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={() => setMobileOpen(false)} />}
       <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} pathname={pathname} onNavigate={() => setMobileOpen(false)} />
@@ -63,6 +66,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} />}
     </div>
+    </AuthGate>
   );
 }
 
@@ -145,16 +149,27 @@ function BrandSwitcher({ collapsed }: { collapsed: boolean }) {
 
 function ProfileCard({ collapsed }: { collapsed: boolean }) {
   const s = useSettings();
-  const name = s.data?.display_name ?? "You";
+  const auth = useAuth();
+  const qc = useQueryClient();
+  const member = auth.data?.member;
+  const name = member?.name ?? s.data?.display_name ?? "You";
+  const sub = member ? `${member.role} · team workspace` : "Local workspace · free";
   return (
     <div className="border-t border-border p-2">
-      <Link href="/settings" className={cn("flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 hover:bg-sunken", collapsed && "lg:justify-center lg:px-0")}>
-        <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">{name.slice(0, 2).toUpperCase()}</span>
-        <span className={cn("min-w-0 flex-1", collapsed && "lg:hidden")}>
-          <span className="block truncate text-[13px] font-medium">{name}</span>
-          <span className="block text-[11px] text-muted">Local workspace · free</span>
-        </span>
-      </Link>
+      <Menu align="start" trigger={
+        <button className={cn("flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left hover:bg-sunken", collapsed && "lg:justify-center lg:px-0")}>
+          <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">{name.slice(0, 2).toUpperCase()}</span>
+          <span className={cn("min-w-0 flex-1", collapsed && "lg:hidden")}>
+            <span className="block truncate text-[13px] font-medium">{name}</span>
+            <span className="block truncate text-[11px] capitalize text-muted">{sub}</span>
+          </span>
+        </button>
+      }>
+        <MenuItem onSelect={() => { window.location.href = "/settings"; }}>Settings</MenuItem>
+        <MenuItem onSelect={() => { window.location.href = "/settings?tab=team"; }}>Team members</MenuItem>
+        <MenuItem onSelect={() => { window.location.href = "/settings?tab=api"; }}>API & MCP</MenuItem>
+        {member && <><MenuSeparator /><MenuItem onSelect={async () => { await post("/auth/logout"); qc.invalidateQueries(); }}>Sign out</MenuItem></>}
+      </Menu>
     </div>
   );
 }
