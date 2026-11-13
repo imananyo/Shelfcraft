@@ -1,12 +1,13 @@
 """Real-model smoke run for the growth features (translate, packaging, ads, voiceover video). Needs the app running."""
 from __future__ import annotations
 
+import os
 import sys
 import time
 
 import httpx
 
-c = httpx.Client(base_url="http://127.0.0.1:8000/api", timeout=60)
+c = httpx.Client(base_url=os.environ.get("SHELFCRAFT_API", "http://127.0.0.1:8000") + "/api", timeout=60)
 results: list[tuple[str, bool, str]] = []
 
 

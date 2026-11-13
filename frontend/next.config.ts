@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 const API_ORIGIN = process.env.SHELFCRAFT_API_ORIGIN ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
+  // Rewrites are baked in at build time, so an isolated test instance (scripts\test-instance.ps1) builds into its own folder.
+  distDir: process.env.SHELFCRAFT_DIST_DIR ?? ".next",
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` },

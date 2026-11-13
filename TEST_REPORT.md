@@ -7,13 +7,37 @@
 
 | Suite | Tool | Result |
 |---|---|---|
-| Backend unit/integration | pytest | **58 passed** (39 core + 19 phase-2 growth/API/MCP/team tests) |
+| Backend unit/integration | pytest | **63 passed** |
 | Frontend type-check | `tsc --noEmit` | **0 errors** |
 | Frontend lint | ESLint (next core-web-vitals + TS) | **0 errors**, 26 warnings (`react-hooks/set-state-in-effect` intentionally downgraded — see `eslint.config.mjs`; 3 `window.location` navigations; 2 unused stub args in tests) |
 | Frontend unit | Vitest | **13 passed** |
 | End-to-end | Playwright (installed Chrome) | **15 passed** — 12 desktop (1440×900) + 3 tablet (834×1112) |
 | Real-model smoke run | `backend\scripts\e2e_real.py` | **7 / 7 passed** (actual local models, no stubs) |
 | Real-model smoke run, phase 2 | `backend\scripts\e2e_real_growth.py` | **4 / 4 passed** |
+| Full feature sweep (real models) | `backend\scripts\feature_sweep.py` on an isolated instance | **all 27 feature groups passed**; browser check 54/54 pages |
+
+## Full feature sweep (real models, isolated instance)
+
+`scripts\test-instance.ps1` starts a separate API (:8100) and web app (:3100) with an empty database (the real
+workspace is never touched). `backend\scripts\feature_sweep.py` then drives **every feature** through the API with the
+real local models, and a Playwright pass opens every page it created (and every tab on it).
+
+| Area | Result (real models) |
+|---|---|
+| System, brands (logo, guideline, activate), products (CRUD, photos, duplicate, CSV export/import, paste import, 360 angle upload) | ✅ |
+| Product research · listing copy (Amazon, Shopify, Amazon mobile) · edit/regenerate/versions/restore · TXT/CSV/JSON export | ✅ (Ollama `qwen2.5:3b`, 66–108 s per generation) |
+| Translation (Spanish) · grader (rules + AI review) · Title & Bullets bulk | ✅ after fix: brand names were being translated |
+| Listing image set (7 slots) · all 14 creative types · all 8 spot-edit operations · Steal the look · Image → layers | ✅ (rembg, SD-Turbo, LaMa, RapidOCR) |
+| Editor (save, 409 conflict, revisions, PNG/JPEG/JSON export, import, templates, projects) · Scale apply · A+ (3 tiers, 7-module limit, preview, ZIP) | ✅ |
+| Factory (2 products × 3 types + ZIP) · playbooks (5 templates, import, run) · video render + voiceover · 360° spin · ads (image + video) · packaging + render | ✅ |
+| Library (favorite, tags, folders, ZIP, WebP convert) · public API `/v1` + MCP tools + key revoke · providers · settings · backup | ✅ |
+| Browser check of all 54 created/main pages (incl. every tab) | ✅ 54/54, no runtime errors, no 5xx |
+
+**Bug found and fixed:** translating a listing turned the brand name into words ("Hearth & Field" → "hornear y campo").
+Brand names, SKUs and ASINs are now swapped for tokens before translation and restored afterwards (regression test added).
+
+Not covered: hosted providers with real keys (Groq key present but its configured model was retired — see Settings),
+Amazon SP-API, the Android app on a physical phone.
 
 ## Phase 2 (Pixii-parity) additions
 

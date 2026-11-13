@@ -20,12 +20,41 @@ LANGUAGES = {"en": "English", "de": "German", "fr": "French", "es": "Spanish", "
 
 
 # ---------------------------------------------------------------- translate
-def translate_texts(texts: list[str], language: str, *, context: str = "", provider: str | None = None) -> tuple[list[str], str, str]:
-    """Translate a list of short strings, preserving order/count. Falls back to originals for blanks."""
+def _protect(texts: list[str], keep: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Swap brand names etc. for opaque tokens so small models can't translate them (e.g. "Hearth & Field")."""
+    import re
+
+    tokens: dict[str, str] = {}
+    out = list(texts)
+    for i, term in enumerate(sorted({k.strip() for k in keep if k and len(k.strip()) >= 2}, key=len, reverse=True)):
+        tok = f"ZQX{i}"
+        pat = re.compile(re.escape(term), re.IGNORECASE)
+        if any(pat.search(t) for t in out):
+            tokens[tok] = term
+            out = [pat.sub(tok, t) for t in out]
+    return out, tokens
+
+
+def _restore(texts: list[str], tokens: dict[str, str]) -> list[str]:
+    import re
+
+    out = []
+    for t in texts:
+        for tok, term in tokens.items():
+            t = re.sub(re.escape(tok), term.replace("\\", "\\\\"), t, flags=re.IGNORECASE)
+        out.append(t)
+    return out
+
+
+def translate_texts(texts: list[str], language: str, *, context: str = "", provider: str | None = None,
+                    keep: list[str] | None = None) -> tuple[list[str], str, str]:
+    """Translate a list of short strings, preserving order/count. Falls back to originals for blanks.
+    Terms in `keep` (brand names, model numbers) are protected and come back unchanged."""
     lang = LANGUAGES.get(language, language)
-    items = [t for t in texts]
+    items, tokens = _protect(list(texts), keep or [])
     prompt = (f"Translate each item into {lang} for an e-commerce listing{(' (' + context + ')') if context else ''}. "
-              "Localize naturally for shoppers (units, idioms) but keep brand and product names unchanged. "
+              "Localize naturally for shoppers (units, idioms) but keep brand and product names unchanged, "
+              "and copy codes like ZQX0 exactly as they are. "
               "Keep any leading CAPITALIZED benefit header followed by a colon. Return JSON {\"items\": [...]} with "
               f"exactly {len(items)} strings in the same order.\n\n" + "\n".join(f"{i + 1}. {t}" for i, t in enumerate(items)))
     res = fm.generate_text(TextRequest(prompt=prompt, system="You are a professional e-commerce localizer. Respond with JSON only.",
@@ -33,7 +62,7 @@ def translate_texts(texts: list[str], language: str, *, context: str = "", provi
     out = res.json().get("items") if isinstance(res.json(), dict) else None
     if not isinstance(out, list) or len(out) != len(items):
         raise ValueError("translation returned a different number of items — try again or use a larger model")
-    return [str(o) if str(o).strip() else items[i] for i, o in enumerate(out)], res.provider, res.model
+    return _restore([str(o) if str(o).strip() else items[i] for i, o in enumerate(out)], tokens), res.provider, res.model
 
 
 def translate_listing(db: Session, project_id: str, language: str, country: str, *, translate_images: bool = True,
@@ -51,7 +80,14 @@ def translate_listing(db: Session, project_id: str, language: str, country: str,
     fields = [c.get("title", ""), *(c.get("bullets") or []), c.get("description", ""), c.get("search_terms", ""),
               c.get("headline", ""), c.get("subheadline", ""), ", ".join(c.get("keywords") or [])]
     tick(0.15, "Translating copy")
-    tr, prov, model = translate_texts(fields, language, context=f"{data.get('marketplace', 'amazon')} {country}", provider=provider)
+    brand = db.get(Brand, src.brand_id) if src.brand_id else None
+    product = db.get(Product, src.product_id) if src.product_id else None
+    import re as _re
+
+    keep = [x for x in (brand.name if brand else None, product.sku if product else None, product.asin if product else None) if x]
+    if brand and "(" in brand.name:
+        keep.append(_re.sub(r"\s*\(.*?\)\s*", " ", brand.name).strip())  # "Hearth & Field (demo)" → "Hearth & Field"
+    tr, prov, model = translate_texts(fields, language, context=f"{data.get('marketplace', 'amazon')} {country}", provider=provider, keep=keep)
     nb = len(c.get("bullets") or [])
     new_copy = {**c, "title": tr[0], "bullets": tr[1:1 + nb], "description": tr[1 + nb], "search_terms": tr[2 + nb],
                 "headline": tr[3 + nb], "subheadline": tr[4 + nb],
@@ -80,7 +116,7 @@ def translate_listing(db: Session, project_id: str, language: str, country: str,
             doc = copy.deepcopy(document_json(d))
             text_layers = [layer for layer in doc["layers"] if layer["type"] == "text" and (layer.get("text") or "").strip()]
             if text_layers:
-                translated, _, _ = translate_texts([layer["text"] for layer in text_layers], language, provider=provider)
+                translated, _, _ = translate_texts([layer["text"] for layer in text_layers], language, provider=provider, keep=keep)
                 for layer, t in zip(text_layers, translated):
                     layer["text"] = t
             for layer in doc["layers"]:

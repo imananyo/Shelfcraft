@@ -334,6 +334,16 @@ def test_listing_copy_retries_when_first_output_is_broken(monkeypatch, client, p
     assert copy_["title"] == "Second try" and calls == [0.6, 0.3]
 
 
+def test_translation_protects_brand_names():
+    from app.services.growth import _protect, _restore
+
+    texts, tok = _protect(["Hearth & Field Stoneware Mug", "Made by hearth & field"], ["Hearth & Field (demo)", "Hearth & Field"])
+    assert all("Hearth" not in t and "hearth" not in t for t in texts) and tok
+    # The model "translates" everything else but must leave the token alone.
+    translated = [t.replace("Stoneware Mug", "Taza de gres").replace("Made by", "Hecho por") for t in texts]
+    assert _restore(translated, tok) == ["Hearth & Field Taza de gres", "Hecho por Hearth & Field"]
+
+
 def test_listing_with_string_keywords_is_served_as_list(client, prod):
     from app.db.models import Project
     from app.db.session import session_scope
