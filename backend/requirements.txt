@@ -1,0 +1,22 @@
+# Core API
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+python-multipart>=0.0.12
+sqlalchemy>=2.0.36
+alembic>=1.14
+httpx>=0.28
+
+# Imaging / documents
+pillow>=11.0
+numpy>=1.26,<3
+opencv-python-headless>=4.10
+rembg>=2.0.59           # U^2-Net background removal (MIT), CPU via onnxruntime
+onnxruntime>=1.19       # LaMa inpainting + rembg
+scikit-learn>=1.5       # k-means palette extraction
+pypdf>=5.1              # brand guideline text extraction
+bleach>=6.2             # sanitize user HTML
+
+# Tests
+pytest>=8.3
