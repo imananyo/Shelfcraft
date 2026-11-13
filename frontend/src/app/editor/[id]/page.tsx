@@ -34,7 +34,7 @@ export default function EditorPage() {
   const [error, setError] = React.useState<Error | null>(null);
   const [saveState, setSaveState] = React.useState<SaveState>("saved");
   const [name, setName] = React.useState("");
-  const [panels, setPanels] = React.useState({ left: true, right: true });
+  const [panels, setPanels] = React.useState(() => ({ left: true, right: typeof window === "undefined" || window.innerWidth >= 1024 }));
   const [templatesOpen, setTemplatesOpen] = React.useState(false);
   const [revisionsOpen, setRevisionsOpen] = React.useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = React.useState(false);
@@ -133,7 +133,9 @@ export default function EditorPage() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = fname;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     const d = useEditor.getState().doc!;
     toast.success(`Exported ${d.width}×${d.height} ${fmt.toUpperCase()} · ${(blob.size / 1024).toFixed(0)} KB`);
@@ -146,11 +148,11 @@ export default function EditorPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border bg-surface px-2">
+      <div className="scrollbar-thin flex h-12 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-surface px-2">
         <Link href={meta?.project_id ? `/projects/${meta.project_id}` : "/projects"}><Button variant="ghost" size="icon-sm" aria-label="Back"><ArrowLeft /></Button></Link>
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => save({ silent: true })} aria-label="Design name"
           className="h-8 w-44 rounded-[8px] border border-transparent bg-transparent px-2 text-[13.5px] font-medium hover:border-border focus:border-primary focus:outline-none sm:w-64" />
-        <span className="hidden items-center gap-1.5 text-xs text-muted md:flex">{statusIcon}{statusText}</span>
+        <span className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted md:flex">{statusIcon}{statusText}</span>
         <div className="mx-2 h-5 w-px bg-border" />
         <Tip content="Undo (Ctrl+Z)"><Button variant="ghost" size="icon-sm" aria-label="Undo" disabled={!st.past.length} onClick={st.undo}><Undo2 /></Button></Tip>
         <Tip content="Redo (Ctrl+Y)"><Button variant="ghost" size="icon-sm" aria-label="Redo" disabled={!st.future.length} onClick={st.redo}><Redo2 /></Button></Tip>
@@ -161,7 +163,7 @@ export default function EditorPage() {
         <Tip content="Grid"><Button variant="ghost" size="icon-sm" aria-label="Toggle grid" className={cn(st.showGrid && "bg-ai-soft text-ai")} onClick={st.toggleGrid}><Grid3x3 /></Button></Tip>
         <Tip content="Snap to guides"><Button variant="ghost" size="icon-sm" aria-label="Toggle snapping" className={cn(st.snap && "bg-ai-soft text-ai")} onClick={st.toggleSnap}><Magnet /></Button></Tip>
         {doc && <Badge className="ml-1 hidden font-mono lg:inline-flex">{doc.width}×{doc.height}</Badge>}
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <Tip content="Layers panel"><Button variant="ghost" size="icon-sm" aria-label="Toggle layers panel" onClick={() => setPanels((p) => ({ ...p, left: !p.left }))}><PanelLeft /></Button></Tip>
           <Tip content="Properties panel"><Button variant="ghost" size="icon-sm" aria-label="Toggle properties panel" onClick={() => setPanels((p) => ({ ...p, right: !p.right }))}><PanelRight /></Button></Tip>
           <Button variant="ghost" size="sm" onClick={() => setRevisionsOpen(true)}><History /><span className="hidden sm:inline">History</span></Button>
@@ -185,11 +187,11 @@ export default function EditorPage() {
           <Button size="sm" onClick={async () => { const r = await get<DocSummary>(`/documents/${id}`); version.current = r.version; setSaveState("dirty"); save({ checkpoint: true }); }}>Keep mine (overwrite)</Button>
         </div>
       )}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {doc && <ToolRail onTemplates={() => setTemplatesOpen(true)} />}
         {panels.left && <aside className="hidden w-[240px] shrink-0 flex-col border-r border-border bg-surface md:flex"><LayersPanel /></aside>}
         <div className="relative min-w-0 flex-1">{doc ? <EditorCanvas /> : <Skeleton className="m-8 h-[70vh]" />}</div>
-        {panels.right && <aside className="scrollbar-thin w-[280px] shrink-0 overflow-y-auto border-l border-border bg-surface max-lg:absolute max-lg:right-0 max-lg:top-[48px] max-lg:z-20 max-lg:h-[calc(100%-48px)] max-lg:shadow-[var(--shadow-pop)]">
+        {panels.right && <aside className="scrollbar-thin w-[280px] shrink-0 overflow-y-auto border-l border-border bg-surface max-lg:absolute max-lg:right-0 max-lg:top-0 max-lg:z-20 max-lg:h-full max-lg:shadow-[var(--shadow-pop)]">
           {doc && <PropertiesPanel brandColors={brand?.colors ?? []} />}
         </aside>}
       </div>

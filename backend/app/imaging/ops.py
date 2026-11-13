@@ -62,9 +62,11 @@ def fit_size(w: int, h: int, max_w: int, max_h: int) -> tuple[int, int]:
 def contact_shadow(cutout: Image.Image, strength: float = 0.35, blur: int = 18) -> Image.Image:
     """Soft elliptical ground shadow sized to the product footprint."""
     w, h = cutout.size
-    sh = Image.new("L", (w, max(8, h // 6)), 0)
+    eh = max(8, h // 7)
+    pad = blur * 3  # room for the blur to fall off to zero → no visible tile edges
+    sh = Image.new("L", (w + pad * 2, eh + pad * 2), 0)
     d = ImageDraw.Draw(sh)
-    d.ellipse((w * 0.08, 0, w * 0.92, sh.height), fill=int(255 * strength))
+    d.ellipse((pad + w * 0.1, pad, pad + w * 0.9, pad + eh), fill=int(255 * strength))
     sh = sh.filter(ImageFilter.GaussianBlur(blur))
     shadow = Image.new("RGBA", sh.size, (0, 0, 0, 0))
     shadow.putalpha(sh)
@@ -82,10 +84,48 @@ def composite_product(background: Image.Image, cutout: Image.Image, *, scale: fl
     y = int(bg.height * anchor[1] - th / 2)
     if shadow:
         sh = contact_shadow(cut)
-        sh = sh.resize((int(tw * 1.05), sh.height))
-        bg.alpha_composite(sh, (int(x - tw * 0.025), min(bg.height - sh.height, y + th - sh.height // 2)))
-    bg.alpha_composite(cut, (x, y))
+        # Centre the padded shadow under the product's base.
+        sx = int(x + tw / 2 - sh.width / 2)
+        sy = int(y + th - sh.height / 2)
+        _alpha_paste(bg, sh, sx, sy)
+    _alpha_paste(bg, cut, x, y)
     return bg
+
+
+def _alpha_paste(base: Image.Image, tile: Image.Image, x: int, y: int) -> None:
+    """alpha_composite that tolerates tiles extending past the canvas edges."""
+    left, top = max(0, -x), max(0, -y)
+    right, bottom = min(tile.width, base.width - x), min(tile.height, base.height - y)
+    if right > left and bottom > top:
+        base.alpha_composite(tile.crop((left, top, right, bottom)), (x + left, y + top))
+
+
+def clean_text_artifacts(im: Image.Image, edge: float = 0.18) -> tuple[Image.Image, int]:
+    """Remove hallucinated watermark-like text that few-step diffusion models often add near edges.
+
+    Only text-like regions inside the top/bottom `edge` band are considered (the centre is left alone so
+    real scene detail isn't touched). Uses LaMa when available; returns (image, regions_removed).
+    """
+    from app.imaging import inpaint
+
+    if not inpaint.lama_available():
+        return im, 0
+    lay = analyze_layout(im)
+    w, h = im.size
+    boxes = [b for b in lay["text_blocks"] if b["y"] > 1 - edge - 0.02 or b["y"] + b["h"] < edge + 0.02]
+    if not boxes:
+        return im, 0
+    mask = Image.new("L", im.size, 0)
+    d = ImageDraw.Draw(mask)
+    for b in boxes:
+        pad_x, pad_y = int(w * 0.015), int(h * 0.015)
+        d.rectangle((int(b["x"] * w) - pad_x, int(b["y"] * h) - pad_y, int((b["x"] + b["w"]) * w) + pad_x,
+                     int((b["y"] + b["h"]) * h) + pad_y), fill=255)
+    try:
+        return inpaint.inpaint_lama(im.convert("RGB"), mask), len(boxes)
+    except Exception:  # noqa: BLE001 - cleanup is best-effort; never fail a generation over it
+        log.warning("text-artifact cleanup failed", exc_info=True)
+        return im, 0
 
 
 def white_background(cutout: Image.Image, size: int = 2000, fill_ratio: float = 0.85) -> Image.Image:

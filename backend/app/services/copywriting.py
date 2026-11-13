@@ -152,12 +152,13 @@ def creative_prompt(p: Product | None, brand: Brand | None, creative_type: str, 
                     background_only: bool = True) -> str:
     """Image prompt. In background-only mode the real product photo is composited afterwards."""
     scene = {
-        "hero": "premium studio hero shot backdrop, elegant pedestal, dramatic soft key light, subtle reflections",
-        "lifestyle": "realistic lifestyle setting where this product is naturally used, warm natural light",
-        "studio": "clean seamless studio backdrop, soft diffused light, gentle floor shadow area",
-        "promo": "bold promotional backdrop with dynamic shapes and depth",
-        "social": "eye-catching social media backdrop, modern, depth and color",
-        "detail": "macro texture backdrop that complements the product material",
+        "hero": "product photo backdrop, empty round pedestal, eye-level, soft dramatic light",
+        # Close-up of a surface + blurred background makes a composited product look naturally placed.
+        "lifestyle": "close-up of an empty tabletop at eye level, blurred cozy interior background, bokeh, warm natural light",
+        "studio": "seamless studio backdrop, soft diffused light, empty floor, eye-level",
+        "promo": "bold promotional backdrop, dynamic shapes, depth",
+        "social": "modern colorful social media backdrop with depth",
+        "detail": "macro texture backdrop, soft light",
         "background": "product photography background",
     }.get(creative_type, "product photography background")
     styles = {
@@ -165,20 +166,28 @@ def creative_prompt(p: Product | None, brand: Brand | None, creative_type: str, 
         "natural": "natural materials, wood, linen, plants", "vibrant": "vibrant saturated colors, playful",
         "editorial": "editorial magazine photography, cinematic", "tech": "sleek modern tech aesthetic, cool tones",
     }
-    parts = [scene, styles.get(style, style)]
-    if p:
-        parts.append(f"suited for a {p.category or 'consumer product'}: {p.name}")
-    if brand and brand.aesthetic:
-        parts.append("aesthetic: " + ", ".join(brand.aesthetic))
-    if brand and brand.colors:
-        parts.append("color accents matching " + ", ".join(brand.colors[:3]))
-    if extra:
-        parts.append(extra)
+    # CLIP-based models (SD/SD-Turbo) read only ~77 tokens, so the most important instructions come FIRST
+    # and the prompt is kept short. In background-only mode the product name/category is deliberately NOT
+    # mentioned: few-step models ignore negative prompts and would paint extra copies of the product.
+    parts = [extra.strip()] if extra.strip() else []
+    parts.append(scene)
     if background_only:
-        parts.append("empty foreground space in the center for a product, no products, no text, no logos, no people's faces")
-    else:
-        parts.append("photorealistic, high detail, professional product photography, no text, no watermark")
-    return ", ".join(parts)
+        parts.append("empty surface in the center, nothing on it, uncluttered")
+    elif p:
+        parts.append(f"featuring a {p.category or 'consumer product'}: {p.name}")
+    parts.append(styles.get(style, style))
+    if background_only and p and p.category:
+        parts.append(f"{p.category} setting")
+    if brand and brand.aesthetic:
+        parts.append(", ".join(brand.aesthetic[:3]).lower())
+    parts.append("photorealistic, no text, no watermark" if not background_only else "no text, no people")
+    return clip_safe(", ".join(parts))
+
+
+def clip_safe(prompt: str, max_words: int = 55) -> str:
+    """Approximate the 77-token CLIP limit (≈1.3 tokens/word) without loading a tokenizer."""
+    words = prompt.split()
+    return " ".join(words[:max_words]).rstrip(",")
 
 
 NEGATIVE = "text, watermark, logo, letters, signature, blurry, lowres, distorted, deformed, extra objects"

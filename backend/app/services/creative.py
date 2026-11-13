@@ -79,7 +79,11 @@ def generate_background(prompt: str, w: int, h: int, *, provider: str | None, se
         res = fm.generate_image(ImageRequest(prompt=prompt, negative_prompt=NEGATIVE, width=w, height=h, seed=seed),
                                 purpose="background", preferred=provider)
         bg = ops.cover_resize(ops.from_bytes(res.image_png).convert("RGB"), w, h)
-        return bg, {"provider": res.provider, "model": res.model, "ai": True, "seed": res.seed}
+        bg, cleaned = ops.clean_text_artifacts(bg)
+        prov: dict[str, Any] = {"provider": res.provider, "model": res.model, "ai": True, "seed": res.seed}
+        if cleaned:
+            prov["text_artifacts_removed"] = cleaned
+        return bg, prov
     except NoProviderAvailable as e:
         log.info("no image provider; using gradient backdrop (%s)", e)
         return ops.studio_gradient(w, h, *fallback_colors), {
@@ -161,11 +165,14 @@ def generate_creative(db: Session, *, product_id: str | None, brand_id: str | No
         bg, prov = generate_background(prompt, width, height, provider=provider, seed=seed,
                                        fallback_colors=(colors[0] if creative_type == "promo" else "#f5f5f4", "#d6d3d1"))
         tick(0.75, "Compositing your product")
-        scale = {"detail": 0.82, "hero": 0.6, "lifestyle": 0.5, "studio": 0.62}.get(creative_type, 0.6)
-        comp = ops.composite_product(bg, load_image(cutout), scale=scale)
+        # Per-type placement: products sit on the lower third (where generated surfaces usually are).
+        scale, anchor = {"detail": (0.82, (0.5, 0.52)), "hero": (0.55, (0.5, 0.55)), "lifestyle": (0.42, (0.5, 0.64)),
+                         "studio": (0.58, (0.5, 0.58))}.get(creative_type, (0.55, (0.5, 0.58)))
+        comp = ops.composite_product(bg, load_image(cutout), scale=scale, anchor=anchor)
         meta = {"creative_type": creative_type, "prompt": prompt, "style": style, "seed": prov.get("seed"),
                 "background_provider": prov["provider"], "background_model": prov["model"],
                 "parent_asset_id": src.id if src else None, "operation": "composite",
+                "text_artifacts_removed": prov.get("text_artifacts_removed", 0),
                 "note": prov.get("note") or "Background generated; product pixels are from your photo."}
         out_provider, out_model = prov["provider"], prov["model"]
         if harmonize and prov["ai"]:
@@ -189,7 +196,7 @@ def generate_creative(db: Session, *, product_id: str | None, brand_id: str | No
         filled = fill_template({"width": width, "height": height, "background": "#ffffff", "layers": [
             {"id": "bg", "type": "image", "name": "Background", "x": 0, "y": 0, "width": width, "height": height,
              "rotation": 0, "opacity": 1, "locked": True, "visible": True, "placeholder": "background", "fit": "cover"},
-            {"id": "pr", "type": "image", "name": "Product", "x": width * (1 - scale) / 2, "y": height * 0.56 - height * scale / 2,
+            {"id": "pr", "type": "image", "name": "Product", "x": width * (1 - scale) / 2, "y": height * anchor[1] - height * scale / 2,
              "width": width * scale, "height": height * scale, "rotation": 0, "opacity": 1, "locked": False,
              "visible": True, "placeholder": "product_cutout", "fit": "contain"}]},
             {}, {"background": bg_asset.id, "product_cutout": cutout.id})

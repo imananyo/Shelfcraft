@@ -217,15 +217,22 @@ export function ensureFont(family?: string): Promise<void> {
   if (!family || loadedFonts.has(family) || typeof document === "undefined") return Promise.resolve();
   loadedFonts.add(family);
   const id = `gf-${family.replace(/\s+/g, "-")}`;
-  if (!document.getElementById(id)) {
+  // The @font-face rules must exist BEFORE document.fonts.load() is called, otherwise it matches
+  // nothing and canvas text silently falls back. So: wait for the stylesheet, then load the faces.
+  const sheetReady = new Promise<void>((resolve) => {
+    const existing = document.getElementById(id) as HTMLLinkElement | null;
+    if (existing) return resolve();
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:ital,wght@0,400;0,600;0,700;1,400&display=swap`;
+    // Weights only: requesting an italic axis makes Google reject families that have no italics.
+    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@400;600;700&display=swap`;
+    link.onload = () => resolve();
+    link.onerror = () => resolve(); // offline or unknown family → system fallback
     document.head.appendChild(link);
-  }
+  });
   return Promise.race([
-    Promise.all([document.fonts.load(`400 24px "${family}"`), document.fonts.load(`700 24px "${family}"`)]).then(() => undefined),
-    new Promise<void>((r) => setTimeout(r, 4000)),
+    sheetReady.then(() => Promise.all([document.fonts.load(`400 24px "${family}"`), document.fonts.load(`700 24px "${family}"`)])).then(() => undefined),
+    new Promise<void>((r) => setTimeout(r, 6000)),
   ]);
 }

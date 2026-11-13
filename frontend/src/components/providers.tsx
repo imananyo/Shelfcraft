@@ -12,13 +12,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
       },
     }),
   );
+  // Shelfcraft is a local, data-driven app with no SEO needs: render it client-side only.
+  // This avoids hydration mismatches when Suspense boundaries hydrate after data has loaded.
+  const mounted = React.useSyncExternalStore(() => () => {}, () => true, () => false);
   return (
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        {children}
+        {mounted ? children : <BootSplash />}
         <Toaster position="bottom-right" richColors closeButton toastOptions={{ className: "!rounded-[12px] !text-[13px]" }} />
       </TooltipProvider>
     </QueryClientProvider>
+  );
+}
+
+function BootSplash() {
+  return (
+    <div className="flex h-full items-center justify-center" aria-busy="true" aria-label="Loading Shelfcraft">
+      <div className="size-8 animate-pulse rounded-[9px] bg-primary/80" />
+    </div>
   );
 }
 
