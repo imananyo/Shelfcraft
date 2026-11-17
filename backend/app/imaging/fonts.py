@@ -1,7 +1,7 @@
 """Font resolution for server-side rendering.
 
 Order: data/fonts cache → download from the google/fonts GitHub repo (OFL/Apache fonts) →
-Windows system fonts → Pillow's built-in scalable default. Downloads are best-effort and
+system fonts (Windows/macOS/Linux) → Pillow's built-in scalable default. Downloads are best-effort and
 cached; rendering never fails because of a missing font.
 """
 from __future__ import annotations
@@ -21,13 +21,38 @@ log = logging.getLogger("shelfcraft.fonts")
 _lock = threading.Lock()
 _failed: set[str] = set()
 
-WINDOWS_FONTS = Path("C:/Windows/Fonts")
+# System font folders for Windows, macOS and Linux (searched recursively, first match wins).
+SYSTEM_FONT_DIRS = [
+    Path("C:/Windows/Fonts"),
+    Path("/System/Library/Fonts/Supplemental"), Path("/Library/Fonts"), Path.home() / "Library" / "Fonts",
+    Path("/usr/share/fonts"), Path("/usr/local/share/fonts"), Path.home() / ".local" / "share" / "fonts",
+    Path.home() / ".fonts",
+]
 SYSTEM_FALLBACKS = {
-    "regular": ["segoeui.ttf", "arial.ttf", "calibri.ttf"],
-    "bold": ["segoeuib.ttf", "arialbd.ttf", "calibrib.ttf"],
-    "italic": ["segoeuii.ttf", "ariali.ttf"],
-    "bold italic": ["segoeuiz.ttf", "arialbi.ttf"],
+    "regular": ["segoeui.ttf", "arial.ttf", "Arial.ttf", "calibri.ttf", "DejaVuSans.ttf",
+                "LiberationSans-Regular.ttf", "NotoSans-Regular.ttf", "FreeSans.ttf"],
+    "bold": ["segoeuib.ttf", "arialbd.ttf", "Arial Bold.ttf", "calibrib.ttf", "DejaVuSans-Bold.ttf",
+             "LiberationSans-Bold.ttf", "NotoSans-Bold.ttf", "FreeSansBold.ttf"],
+    "italic": ["segoeuii.ttf", "ariali.ttf", "Arial Italic.ttf", "DejaVuSans-Oblique.ttf",
+               "LiberationSans-Italic.ttf", "NotoSans-Italic.ttf", "FreeSansOblique.ttf"],
+    "bold italic": ["segoeuiz.ttf", "arialbi.ttf", "Arial Bold Italic.ttf", "DejaVuSans-BoldOblique.ttf",
+                    "LiberationSans-BoldItalic.ttf", "NotoSans-BoldItalic.ttf", "FreeSansBoldOblique.ttf"],
 }
+
+
+@lru_cache(maxsize=8)
+def _system_font(key: str) -> Path | None:
+    """Find the first available system fallback font for a style on any OS."""
+    dirs = [d for d in SYSTEM_FONT_DIRS if d.is_dir()]
+    for name in SYSTEM_FALLBACKS[key]:
+        for d in dirs:
+            if (d / name).is_file():
+                return d / name
+        for d in dirs:  # Linux distros nest fonts in sub-folders (e.g. truetype/dejavu)
+            hit = next(d.rglob(name), None)
+            if hit:
+                return hit
+    return None
 
 
 def fonts_dir() -> Path:
@@ -121,8 +146,10 @@ def get_font(family: str | None, size: int, style: str = "normal") -> ImageFont.
                 return font
             except OSError:
                 log.warning("could not load font file %s", path)
-    for name in SYSTEM_FALLBACKS[key]:
-        p = WINDOWS_FONTS / name
-        if p.exists():
+    p = _system_font(key)
+    if p:
+        try:
             return ImageFont.truetype(str(p), size)
+        except OSError:
+            log.warning("could not load system font %s", p)
     return ImageFont.load_default(size)

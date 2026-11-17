@@ -35,7 +35,7 @@ export function useProviders() {
 
 export function useCapabilities() {
   return useApi<{ text_ai: boolean; image_ai: boolean; local_diffusion_installed: boolean; background_removal: boolean;
-    object_removal_ai: boolean; video: boolean }>(["capabilities"], "/capabilities", { refetchInterval: 30000 });
+    object_removal_ai: boolean; video: boolean; mcp?: { command: string; script: string } }>(["capabilities"], "/capabilities", { refetchInterval: 30000 });
 }
 
 /** Poll a job until it finishes; fires callbacks once. */

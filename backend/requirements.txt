@@ -26,7 +26,7 @@ shapely>=2.0
 six>=1.16
 pyyaml>=6.0
 
-# Offline text-to-speech for voiceover videos (uses Windows' built-in voices)
+# Offline text-to-speech for voiceover videos (Windows SAPI / macOS voices / espeak-ng on Linux)
 pyttsx3>=2.98
 
 # MCP server (backend/mcp_server.py)

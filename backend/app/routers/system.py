@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import sys
 import zipfile
 from datetime import datetime, timezone
 from typing import Any
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.fallback_manager import image_available, text_available
 from app.ai.usage_tracker import usage_summary
-from app.config import get_settings
+from app.config import BACKEND_DIR, get_settings
 from app.db.models import (
     Asset,
     Brand,
@@ -73,6 +74,8 @@ def capabilities() -> dict[str, Any]:
         "background_removal": True,
         "object_removal_ai": lama_available(),
         "video": bool(find_tool("ffmpeg")),
+        # Real paths on this machine, so the MCP config snippet works on Windows, macOS and Linux.
+        "mcp": {"command": sys.executable, "script": str(BACKEND_DIR / "mcp_server.py")},
     }
 
 

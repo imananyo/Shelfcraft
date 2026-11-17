@@ -31,19 +31,30 @@ class VideoError(RuntimeError):
 
 
 def find_tool(name: str) -> str | None:
-    """Locate ffmpeg/ffprobe: explicit setting → PATH → winget's links folder (PATH may be stale)."""
+    """Locate ffmpeg/ffprobe on Windows, macOS or Linux.
+
+    Order: explicit setting → PATH → well-known install folders (winget on Windows, Homebrew/MacPorts
+    on macOS, /usr/local on Linux), because a service's PATH may be stale or minimal.
+    """
     import os
 
     from app.config import get_settings
 
+    exe = f"{name}.exe" if os.name == "nt" else name
     explicit = get_settings().ffmpeg_dir
-    candidates = [Path(explicit) / f"{name}.exe"] if explicit else []
+    if explicit and (Path(explicit) / exe).is_file():
+        return str(Path(explicit) / exe)
     found = shutil.which(name)
     if found:
         return found
-    local = os.environ.get("LOCALAPPDATA", "")
-    candidates.append(Path(local) / "Microsoft" / "WinGet" / "Links" / f"{name}.exe")
-    candidates += list((Path(local) / "Microsoft" / "WinGet" / "Packages").glob(f"Gyan.FFmpeg*/**/bin/{name}.exe"))
+    candidates: list[Path] = []
+    if os.name == "nt":
+        local = Path(os.environ.get("LOCALAPPDATA", ""))
+        candidates.append(local / "Microsoft" / "WinGet" / "Links" / exe)
+        candidates += list((local / "Microsoft" / "WinGet" / "Packages").glob(f"Gyan.FFmpeg*/**/bin/{exe}"))
+    else:
+        candidates += [Path(d) / exe for d in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin",
+                                                "/usr/bin", "/snap/bin")]
     for c in candidates:
         if c.is_file():
             return str(c)

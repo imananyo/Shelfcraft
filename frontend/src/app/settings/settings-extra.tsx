@@ -9,7 +9,7 @@ import { Field, Input, Select, Switch } from "@/components/ui/form";
 import { Badge, Card, Notice } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlay";
 import { del, patch, post } from "@/lib/api";
-import { useApi } from "@/lib/hooks";
+import { useApi, useCapabilities } from "@/lib/hooks";
 import { timeAgo } from "@/lib/utils";
 
 const copy = async (text: string, what = "Copied") => { await navigator.clipboard.writeText(text); toast.success(what); };
@@ -87,9 +87,10 @@ export function ApiTab() {
   const [write, setWrite] = React.useState(true);
   const [created, setCreated] = React.useState<string | null>(null);
   const api = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://127.0.0.1:8000";
+  const caps = useCapabilities();
   const mcpJson = JSON.stringify({ mcpServers: { shelfcraft: {
-    command: "C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\.venv\\Scripts\\python.exe",
-    args: ["C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\mcp_server.py"],
+    command: caps.data?.mcp?.command ?? "<shelfcraft>/backend/.venv/bin/python",
+    args: [caps.data?.mcp?.script ?? "<shelfcraft>/backend/mcp_server.py"],
     env: { SHELFCRAFT_API_KEY: created ?? "sk_shelf_…", SHELFCRAFT_API_URL: "http://127.0.0.1:8000" } } } }, null, 2);
   return (
     <div className="grid gap-6 lg:grid-cols-2">

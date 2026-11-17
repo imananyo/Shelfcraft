@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     heavy_job_slots: int = 1  # concurrent image/video jobs (CPU bound)
     job_max_attempts: int = 3
     max_jobs_per_batch: int = 200  # Factory guard: never enqueue unlimited work
-    ffmpeg_dir: str | None = None  # optional folder containing ffmpeg.exe / ffprobe.exe
+    ffmpeg_dir: str | None = None  # optional folder containing ffmpeg / ffprobe (ffmpeg.exe on Windows)
 
     # Provider credentials — optional; providers stay disabled without them.
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
