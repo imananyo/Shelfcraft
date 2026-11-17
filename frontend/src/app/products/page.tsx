@@ -214,8 +214,9 @@ function ImportOptions({ onImported }: { onImported: (id: string) => void }) {
     try {
       const p = mode === "paste"
         ? await post<Product & { note: string }>("/products/import-text", { text })
-        : await post<Product & { images_imported?: number; import?: { note: string } }>("/products/import-source", { kind: "asin", value: asin.trim(), country });
-      toast.success(mode === "paste" ? "Product created from pasted text — review the fields and add photos" : "Imported from Amazon");
+        : await post<Product & { images_imported?: number; import?: { note: string; complete?: boolean } }>("/products/import-source", { kind: "asin", value: asin.trim(), country });
+      if ("import" in p && p.import && p.import.complete === false) toast.warning("Amazon blocked the automatic read. The product page shows how to finish the import from your browser.");
+      else toast.success(mode === "paste" ? "Product created from pasted text — review the fields and add photos" : "Imported from Amazon");
       onImported(p.id);
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };

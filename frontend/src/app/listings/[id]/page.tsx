@@ -68,11 +68,19 @@ function ListingInner() {
   const [confirmDel, setConfirmDel] = React.useState(false);
   const L = q.data;
 
+  // Jobs this page has already seen finish. The listing data is refetched after a job ends, but until the new data
+  // arrives the old copy still lists that job as "running"; without this guard the page re-adopts the finished job,
+  // its JobCard fires onDone again at once, and the two loop forever ("Maximum update depth exceeded").
+  const finished = React.useRef(new Set<string>());
+  const finish = (id: string | null) => { if (id) finished.current.add(id); };
+
   React.useEffect(() => {
     if (!L) return;
-    const running = L.jobs.find((j) => (j.status === "queued" || j.status === "running"));
-    if (running && !jobId && running.type === "listing_copy") setJobId(running.id);
-    if (running && !imgJob && running.type === "listing_images") setImgJob(running.id);
+    const active = L.jobs.filter((j) => (j.status === "queued" || j.status === "running") && !finished.current.has(j.id));
+    const copyJob = active.find((j) => j.type === "listing_copy");
+    const imageJob = active.find((j) => j.type === "listing_images");
+    if (copyJob && !jobId) setJobId(copyJob.id);
+    if (imageJob && !imgJob) setImgJob(imageJob.id);
     if (!dirty) setCopy(L.copy ? safeCopy(L.copy) : { title: "", bullets: ["", "", "", "", ""], description: "", keywords: [], search_terms: "" });
   }, [L, dirty, jobId, imgJob]);
 
@@ -127,7 +135,7 @@ function ListingInner() {
           <Button onClick={() => save(false)} loading={saving} disabled={!dirty}><Save />Save</Button>
           <Button variant="ghost" size="icon" aria-label="Delete listing" onClick={() => setConfirmDel(true)}><Trash2 /></Button>
         </>} />
-      {jobId && <div className="mb-4"><JobCard jobId={jobId} title="Writing listing copy" onDone={() => { setJobId(null); setDirty(false); refresh(); }} /></div>}
+      {jobId && <div className="mb-4"><JobCard jobId={jobId} title="Writing listing copy" onDone={() => { finish(jobId); setJobId(null); setDirty(false); refresh(); }} /></div>}
       <Tabs value={tab} onValueChange={setTab} tabs={[{ value: "copy", label: "Copy" }, { value: "strategy", label: "Strategy & keywords" }, { value: "images", label: "Image set", count: L.images.length }]}>
         <TabPanel value="copy">
           <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
@@ -190,7 +198,7 @@ function ListingInner() {
             </Card>
           </div>
         </TabPanel>
-        <TabPanel value="images"><ImageSet listing={L} style={style} setStyle={setStyle} onGenerate={genImages} jobId={imgJob} onDone={() => { setImgJob(null); refresh(); }} /></TabPanel>
+        <TabPanel value="images"><ImageSet listing={L} style={style} setStyle={setStyle} onGenerate={genImages} jobId={imgJob} onDone={() => { finish(imgJob); setImgJob(null); refresh(); }} /></TabPanel>
       </Tabs>
       <Confirm open={confirmDel} onOpenChange={setConfirmDel} title="Delete this listing?" body="Generated images stay in your asset library."
         onConfirm={async () => { await del(`/listings/${id}`); qc.invalidateQueries({ queryKey: ["listings"] }); router.push("/listings"); }} />

@@ -158,6 +158,66 @@ class ProductImage(Base, TimestampMixin):
     asset: Mapped[Asset] = relationship()
 
 
+class ProductReview(Base, TimestampMixin):
+    """A customer review collected for a product (from pages the user saved, CSV exports or pasted text).
+
+    `content_hash` de-duplicates the same review arriving from several sources/pages."""
+
+    __tablename__ = "product_reviews"
+    __table_args__ = (Index("ux_product_reviews_hash", "product_id", "content_hash", unique=True),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(20), default="paste")  # amazon | walmart | page | csv | paste
+    external_id: Mapped[str | None] = mapped_column(String(80))
+    rating: Mapped[float | None] = mapped_column(Float)
+    title: Mapped[str | None] = mapped_column(String(300))
+    text: Mapped[str] = mapped_column(Text)
+    author: Mapped[str | None] = mapped_column(String(120))
+    review_date: Mapped[str | None] = mapped_column(String(10))  # ISO YYYY-MM-DD when it could be parsed
+    verified: Mapped[bool | None] = mapped_column(Boolean)
+    variant: Mapped[str | None] = mapped_column(String(200))
+    helpful_votes: Mapped[int | None] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(64))
+
+
+class CompetitorListing(Base, TimestampMixin):
+    """A top-performing / competing listing in the product's category, read from pages the user saved in their own
+    browser (Best Sellers lists, search results, competitor product pages). One row per marketplace item; later pages
+    about the same item enrich it."""
+
+    __tablename__ = "competitor_listings"
+    __table_args__ = (Index("ux_competitor_item", "product_id", "market", "market_id", unique=True),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    market: Mapped[str] = mapped_column(String(20))  # amazon | walmart | other
+    market_id: Mapped[str] = mapped_column(String(64))  # ASIN / Walmart item id / URL hash
+    url: Mapped[str | None] = mapped_column(String(1000))
+    title: Mapped[str | None] = mapped_column(Text)
+    brand: Mapped[str | None] = mapped_column(String(200))
+    price: Mapped[float | None] = mapped_column(Float)
+    currency: Mapped[str | None] = mapped_column(String(8))
+    rating: Mapped[float | None] = mapped_column(Float)
+    review_count: Mapped[int | None] = mapped_column(Integer)
+    rank: Mapped[int | None] = mapped_column(Integer)  # position on a Best Sellers list
+    position: Mapped[int | None] = mapped_column(Integer)  # position in search results
+    bsr_rank: Mapped[int | None] = mapped_column(Integer)
+    bsr: Mapped[str | None] = mapped_column(String(300))
+    category: Mapped[str | None] = mapped_column(String(200))
+    monthly_bought: Mapped[int | None] = mapped_column(Integer)  # "1K+ bought in past month" → 1000
+    sponsored: Mapped[bool | None] = mapped_column(Boolean)
+    badges: Mapped[list[Any]] = mapped_column(default=list)
+    bullets: Mapped[list[Any]] = mapped_column(default=list)
+    description: Mapped[str | None] = mapped_column(Text)
+    specifications: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    image_count: Mapped[int | None] = mapped_column(Integer)
+    has_video: Mapped[bool | None] = mapped_column(Boolean)
+    has_aplus: Mapped[bool | None] = mapped_column(Boolean)
+    image_url: Mapped[str | None] = mapped_column(String(1000))
+    reviews: Mapped[list[Any]] = mapped_column(default=list)
+    sources: Mapped[list[Any]] = mapped_column(default=list)  # bestsellers | search | product_page
+    included: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class ProductResearch(Base, TimestampMixin):
     """AI product-intelligence result. `inputs` records exactly what the model was given."""
 

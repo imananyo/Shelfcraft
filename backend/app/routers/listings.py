@@ -40,7 +40,8 @@ def start_research(product_id: str, body: ResearchIn, db: Session = Depends(get_
 
 @router.get("/products/{product_id}/research")
 def list_research(product_id: str, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = db.scalars(select(ProductResearch).where(ProductResearch.product_id == product_id)
+    rows = db.scalars(select(ProductResearch).where(ProductResearch.product_id == product_id,
+                                                    ProductResearch.kind.notin_(("reviews", "category")))
                       .order_by(ProductResearch.created_at.desc()).limit(10)).all()
     return [{"id": r.id, "result": r.result, "inputs": r.inputs, "provider": r.provider, "model": r.model,
              "created_at": r.created_at} for r in rows]

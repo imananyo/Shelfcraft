@@ -56,11 +56,72 @@ def fetch_page(url: str) -> str:
         raise ScrapeError("product not found (HTTP 404) — check the ID and marketplace country")
     if r.status_code >= 400:
         raise ScrapeError(f"the marketplace declined the request (HTTP {r.status_code})")
-    html = r.text[:4_000_000]
+    html = r.text[:MAX_HTML]
+    check_not_blocked(html)
+    return html
+
+
+MAX_HTML = 8_000_000
+
+
+def check_not_blocked(html: str) -> None:
     head = html[:200_000].lower()
     if any(m in head for m in BLOCK_MARKERS) and "producttitle" not in head and "__next_data__" not in head:
         raise ScrapeError("the marketplace showed a CAPTCHA / bot check instead of the product page")
-    return html
+
+
+# ---------------------------------------------------------------- pages the user saved/copied from their own browser
+_ASIN_IN_URL = re.compile(r"(?:/dp/|/gp/product/|/gp/aw/d/|/ASIN/)([A-Z0-9]{10})(?:[/?#\"']|$)", re.I)
+_WALMART_IN_URL = re.compile(r"walmart\.[a-z.]+/ip/(?:[^/?#\"']+/)?(\d{6,14})", re.I)
+
+
+def identify_page(html: str) -> tuple[str, str, str]:
+    """Work out which marketplace product a saved/copied page is: ("amazon"|"walmart", id, canonical url).
+
+    Used when the user opens the page in their own browser (as a normal visitor) and hands Shelfcraft the
+    page source, e.g. after our single automated request was answered with a bot check.
+    """
+    if len(html.strip()) < 200:
+        raise ScrapeError("that doesn't look like a web page; copy the whole page source (Ctrl+U, then Ctrl+A, Ctrl+C)")
+    try:
+        check_not_blocked(html)
+    except ScrapeError:
+        raise ScrapeError("this is the CAPTCHA / bot-check page, not the product page; complete the check in "
+                          "your browser first, then save or copy the product page") from None
+    soup = BeautifulSoup(html, "html.parser")
+    canonical = soup.find("link", rel="canonical")
+    canon = canonical.get("href", "") if canonical else ""
+    og = soup.find("meta", property="og:url")
+    candidates = [canon, og.get("content", "") if og else ""]
+    low = html[:300_000].lower()
+
+    asin_input = soup.select_one("input#ASIN, input[name='ASIN']")
+    if asin_input and re.fullmatch(r"[A-Z0-9]{10}", (asin_input.get("value") or "").strip().upper()):
+        asin = asin_input["value"].strip().upper()
+        domain = re.search(r"https?://(?:www\.)?(amazon\.[a-z.]+)", canon or "")
+        return "amazon", asin, f"https://www.{domain.group(1) if domain else 'amazon.com'}/dp/{asin}"
+    for c in candidates:
+        m = _ASIN_IN_URL.search(c or "")
+        if m and "amazon." in c.lower():
+            return "amazon", m.group(1).upper(), c.split("?")[0]
+        m = _WALMART_IN_URL.search(c or "")
+        if m:
+            return "walmart", m.group(1), f"https://www.walmart.com/ip/{m.group(1)}"
+    if "__next_data__" in low and "walmart" in low:
+        nd = soup.find("script", id="__NEXT_DATA__")
+        try:
+            prod = json.loads(nd.string)["props"]["pageProps"]["initialData"]["data"]["product"]
+            item = str(prod.get("usItemId") or "")
+        except (AttributeError, json.JSONDecodeError, KeyError, TypeError):
+            item = ""
+        if re.fullmatch(r"\d{6,14}", item):
+            return "walmart", item, f"https://www.walmart.com/ip/{item}"
+    if soup.select_one("#productTitle"):
+        m = _ASIN_IN_URL.search(html[:2_000_000])
+        if m:
+            return "amazon", m.group(1).upper(), f"https://www.amazon.com/dp/{m.group(1).upper()}"
+    raise ScrapeError("couldn't recognise an Amazon or Walmart product page in what you pasted; make sure you "
+                      "copied the product page itself (Ctrl+U shows its source)")
 
 
 # ---------------------------------------------------------------- JSON-LD (works on many stores)
@@ -149,16 +210,9 @@ def parse_amazon(html: str) -> dict[str, Any]:
     cnt = soup.select_one("#acrCustomerReviewText")
     if cnt:
         out["review_count"] = int(_price(cnt.get_text()) or 0) or None
-    reviews = []
-    for rv in soup.select('[data-hook="review"]'):
-        body = rv.select_one('[data-hook="review-body"]')
-        stars = rv.select_one('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')
-        title = rv.select_one('[data-hook="review-title"]')
-        text = _clean(body.get_text(" ")) if body else None
-        if text:
-            reviews.append({"rating": _price(stars.get_text()) if stars else None,
-                            "title": _clean(title.get_text(" ")) if title else None, "text": text[:2000]})
-    out["reviews"] = reviews[:20]
+    from app.services.reviews import parse_amazon_reviews
+
+    out["reviews"] = parse_amazon_reviews(soup)[:30]
     if not out.get("name"):
         raise ScrapeError("couldn't find the product on that Amazon page (layout changed or blocked)")
     return out
@@ -206,14 +260,12 @@ def parse_walmart(html: str) -> dict[str, Any]:
             if s.get("name") and s.get("value") and len(specs) < 25:
                 specs[str(s["name"])[:60]] = str(s["value"])[:200]
         out["specifications"] = specs
+        from app.services.reviews import parse_walmart_reviews
+
         rv = data.get("reviews") or {}
         out["rating"] = _price(rv.get("averageOverallRating") or (prod.get("averageRating")))
         out["review_count"] = rv.get("totalReviewCount") or prod.get("numberOfReviews")
-        out["reviews"] = [{"rating": _price(r.get("rating")), "title": _clean(r.get("reviewTitle")),
-                           "text": _clean(r.get("reviewText"))[:2000]}
-                          for r in (rv.get("customerReviews") or []) + (rv.get("topPositiveReview") and [rv["topPositiveReview"]] or [])
-                          + (rv.get("topNegativeReview") and [rv["topNegativeReview"]] or [])
-                          if isinstance(r, dict) and _clean(r.get("reviewText"))][:20]
+        out["reviews"] = parse_walmart_reviews(soup)[:30]
     out["images"] = list(dict.fromkeys(out.get("images") or []))[:8]
     if not out.get("name"):
         raise ScrapeError("couldn't find the product on that Walmart page (layout changed or blocked)")
@@ -230,9 +282,12 @@ def reviews_text(reviews: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)[:20000]
 
 
+IMAGE_HEADERS = {**HEADERS, "Accept": "image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.1"}  # no AVIF: we can't decode it
+
+
 def download_image(url: str) -> bytes | None:
     try:
-        r = httpx.get(url, timeout=20, headers=HEADERS, follow_redirects=True)
+        r = httpx.get(url, timeout=20, headers=IMAGE_HEADERS, follow_redirects=True)
     except httpx.HTTPError:
         return None
     if r.status_code != 200 or len(r.content) > 15_000_000:

@@ -1,7 +1,7 @@
 # Shelfcraft
 
 A local, free-first AI studio for e-commerce sellers: brand profiles, product catalog, product
-intelligence, marketplace listing copy, image generation, a layered design editor, spot edits,
+intelligence, customer-review analysis, competitor / category benchmarks, marketplace listing copy, image generation, a layered design editor, spot edits,
 A+ content, bulk "factory" runs and product videos — running on your own Windows, macOS or Linux computer with
 **zero mandatory API cost**.
 
@@ -15,6 +15,7 @@ A+ content, bulk "factory" runs and product videos — running on your own Windo
 | Capability | Default engine (free) | Runs on |
 |---|---|---|
 | Listing copy, research, translations | **Ollama** `qwen2.5:3b` | your CPU |
+| Review analysis, category analysis | same text engine (local or free hosted) | your CPU / hosted |
 | Optional faster/better text | Gemini · Groq · OpenRouter `:free` · Cloudflare (free tiers) | hosted, opt-in |
 | Image backgrounds / scenes | **SD-Turbo** via diffusers (CPU) | your CPU (~30 s/image) |
 | Optional hosted images | Cloudflare Workers AI `flux-1-schnell` (10k Neurons/day free) | hosted, opt-in |
@@ -81,8 +82,38 @@ source, current limits, license notes, privacy notes, last success/error and rat
 * Free tiers may log or train on prompts — a privacy confirmation is shown before the first hosted provider is enabled.
 * Mistral's adapter exists but is **blocked**: its free tier could not be verified (API keys require billing activation per its docs).
 * Fallback order is configurable; only enabled, free-eligible providers are tried, then local models.
+* **Models are picked automatically.** Leave *Text model* empty (or `auto`) and Gemini, Groq and OpenRouter use the best
+  model your key can use right now (OpenRouter: `:free` models only). Free tiers retire models often — e.g. Nov 2026:
+  `gemini-2.5-flash`, Groq `llama-3.3-70b-versatile`, OpenRouter `llama-3.3-70b-instruct:free`.
+  * A retired / "no longer free" model is skipped from then on, a saved setting naming it is reset to automatic, and the
+    stale error is cleared.
+  * An overloaded model (HTTP 503) falls through to the next-best one — at most 3 attempts per request, to protect daily free quotas.
+  * Paid providers (OpenAI, NanoBanana) never switch models on their own and need a model chosen explicitly.
+  * **Test connection** in Settings also clears old errors and shows the model now in use.
+* HTTP 429 means the provider's own free-tier limit is used up; Shelfcraft pauses that provider and uses the next one.
 
 See `FREE_RESOURCES.md` for limits, licenses and verification dates.
+
+## Customer reviews and competitors
+
+Open a product → **Reviews** and **Competitors** tabs. Everything is collected from pages *you* open in your own
+browser — Shelfcraft never solves CAPTCHAs, rotates proxies or works around bot detection.
+
+* **Import from your browser:** when a marketplace answers an import with a CAPTCHA or sign-in page, open the listing
+  in your normal browser, save the page (Ctrl/⌘+S) or copy its source, and upload/paste it in *Add product → From your
+  browser* (or the banner on the product). Amazon and Walmart product pages are recognised automatically (ASIN / item id
+  must match the product).
+* **Reviews tab:** upload saved review pages (Amazon star-filter links and Walmart review links are provided, up to 40
+  files at a time), CSV exports or pasted text. Duplicates are skipped. Shows a rating histogram, frequent phrases and a
+  filterable review list. **Analyze** tags every review (batches of 12), merges the tags into themes and counts them,
+  then writes praise / complaints / feature requests with real quotes. Above 400 reviews a rating-stratified sample is
+  used. Expect ~12 min for ~40 reviews on a CPU.
+* **Competitors tab:** upload saved Amazon Best Sellers or search-result pages, Walmart search pages or competitor
+  product pages. Shows exact benchmarks (price, rating and review quantiles, monthly sales, title length, image count,
+  video / A+ share, sponsored share, badges, BSR) and keywords competitors use that your listing is missing — competitor
+  brand and product-line names are excluded. **Analyze category** adds an AI summary of what top listings do and what
+  their buyers complain about. Untick a row to leave it out.
+* Listing copy and product research automatically use the latest review and category analyses when you don't paste any.
 
 ## Project layout
 
@@ -136,7 +167,7 @@ data/      (created at runtime, git-ignored) database, media, models, logs, back
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1        # pytest + tsc + eslint + vitest
-powershell -ExecutionPolicy Bypass -File scripts\test.ps1 -E2E   # + Playwright (app must be running)
+powershell -ExecutionPolicy Bypass -File scripts\test.ps1 -E2E   # + Playwright, against the isolated test instance (start it with scripts\test-instance.ps1)
 backend\.venv\Scripts\python.exe backend\scripts\e2e_real.py     # real-model smoke run (slow, CPU)
 ```
 
@@ -146,6 +177,10 @@ macOS / Linux:
 (cd backend && .venv/bin/python -m pytest -q tests)
 (cd frontend && npx tsc --noEmit && npm run lint && npm test)
 ```
+
+Playwright refuses to run against your real workspace on port 3000 (it would create "E2E Brand …" test data there);
+it defaults to the isolated test instance on port 3100. Set `BASE=...` to target another instance, and
+`ALLOW_REAL_WORKSPACE=1` only if you really mean port 3000.
 
 Results: `TEST_REPORT.md`. Status of every feature: `FEATURE_STATUS.md`.
 
@@ -160,4 +195,7 @@ macOS / Linux troubleshooting (Python/Node versions, espeak-ng, fonts, build too
 | `onnxruntime` / `torch` DLL load failed | Install the VC++ runtime (`winget install Microsoft.VCRedist.2015+.x64`) or re-run `setup.ps1` (applies a no-admin fallback) |
 | Video export unavailable | Install FFmpeg (`winget install Gyan.FFmpeg` · `brew install ffmpeg` · `sudo apt install ffmpeg`) and restart |
 | Port already in use | `scripts\stop.ps1` / `bash scripts/stop.sh`, or start with `-ApiPort`/`-WebPort` (`--api-port`/`--web-port`) |
+| Provider card shows "HTTP 404 … model does not exist / no longer available" | Clear *Text model* (automatic) and press **Test connection**; newer versions reset it on their own |
+| Provider card shows "HTTP 429" | That provider's free daily/minute limit is used up — wait, or enable another free provider |
+| Import says CAPTCHA / "robot check" | Use **From your browser**: save the page in your own browser and upload it |
 | Logs | `data\logs\backend.log`, `data\logs\web.log` |

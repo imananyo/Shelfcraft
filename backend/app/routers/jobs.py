@@ -15,7 +15,8 @@ from app.routers.common import get_or_404
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 JOB_LABELS = {
-    "listing_copy": "Listing copy", "product_research": "Product research", "image_generate": "Image generation",
+    "listing_copy": "Listing copy", "product_research": "Product research", "review_analysis": "Review analysis",
+    "category_analysis": "Category analysis", "image_generate": "Image generation",
     "image_edit": "Image edit", "factory_item": "Factory item", "video_render": "Video render",
     "inspire_analyze": "Reference analysis", "inspire_generate": "Reference-guided creative",
     "listing_images": "Listing image set", "aplus_generate": "A+ content",

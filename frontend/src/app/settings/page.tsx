@@ -127,10 +127,11 @@ function ProviderCard({ p, onToggle, onChange }: { p: ProviderStatus; onToggle: 
         </div>
       )}
       {p.kinds.includes("text") && p.state !== "ineligible" && (
-        <Field label="Text model" hint={p.name === "openrouter" ? "Only IDs ending in :free are accepted." : `Default: ${p.default_text_model ?? "—"}`}>
+        <Field label="Text model" hint={p.default_text_model === "auto" ? "Leave on Default: Shelfcraft picks the best model your key can use right now, and switches automatically when the provider retires one (free models change often)."
+          : `Default: ${p.default_text_model ?? "—"}`}>
           <div className="flex gap-2">
             {models.length ? <Select value={model} onChange={(e) => setModel(e.target.value)}><option value="">Default</option>{models.map((m) => <option key={m}>{m}</option>)}</Select>
-              : <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={p.default_text_model ?? ""} />}
+              : <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={p.default_text_model === "auto" ? "Automatic (recommended)" : p.default_text_model ?? ""} />}
             <Button variant="outline" onClick={() => saveCfg({ text_model: model })}>Save</Button>
           </div>
         </Field>
@@ -150,7 +151,8 @@ function ProviderCard({ p, onToggle, onChange }: { p: ProviderStatus; onToggle: 
       {(p.last_error || p.last_success_at) && (
         <div className="border-t border-border pt-2 text-[11.5px] text-muted">
           {p.last_success_at && <span>Last success {timeAgo(p.last_success_at)}. </span>}
-          {p.last_error && <span className="text-danger">Last error {timeAgo(p.last_failure_at)}: {p.last_error}</span>}
+          {p.last_error && !(p.last_success_at && p.last_failure_at && new Date(p.last_success_at) > new Date(p.last_failure_at)) &&
+            <span className="text-danger">Last error {timeAgo(p.last_failure_at)}: {p.last_error}</span>}
           {p.rate_limited_until && <span> · Rate-limited until {new Date(p.rate_limited_until).toLocaleTimeString()}</span>}
         </div>
       )}

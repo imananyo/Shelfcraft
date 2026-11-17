@@ -7,6 +7,9 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { BrowserPageImport } from "@/components/browser-page-import";
+import { ProductCompetitors } from "@/components/product-competitors";
+import { ProductReviews } from "@/components/product-reviews";
 import { AssetResult, BrandSelect, ImageThumb, JobCard } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Dropzone } from "@/components/ui/dropzone";
@@ -43,14 +46,23 @@ export default function ProductPage() {
             <MenuItem icon={<Trash2 />} destructive onSelect={() => setConfirm(true)}>Delete product</MenuItem>
           </Menu>
         </>} />
+      {p && (p.tags ?? []).some((t) => t === "amazon" || t === "walmart") && !p.description && !p.features?.length && (
+        <div className="mb-5 flex flex-col gap-3">
+          <Notice tone="warning">The marketplace blocked Shelfcraft’s automatic read of this product page, so only its ID was saved. Finish the import from your own browser:</Notice>
+          <BrowserPageImport compact productId={p.id} pageUrl={p.source_url} onDone={refresh} />
+        </div>
+      )}
       {!p ? <Skeleton className="h-96" /> : (
         <Tabs value={tab} onValueChange={setTab} tabs={[
           { value: "details", label: "Details" }, { value: "images", label: "Images", count: p.images.filter((i) => i.role !== "cutout").length },
-          { value: "variants", label: "Variants", count: p.variants?.length ?? 0 }, { value: "intelligence", label: "Intelligence" }, { value: "creatives", label: "Creatives" },
+          { value: "variants", label: "Variants", count: p.variants?.length ?? 0 }, { value: "reviews", label: "Reviews" }, { value: "competitors", label: "Competitors" },
+          { value: "intelligence", label: "Intelligence" }, { value: "creatives", label: "Creatives" },
         ]}>
-          <TabPanel value="details"><DetailsTab product={p} onSaved={refresh} /></TabPanel>
+          <TabPanel value="details"><DetailsTab key={p.updated_at} product={p} onSaved={refresh} /></TabPanel>
           <TabPanel value="images"><ImagesTab product={p} onChange={refresh} /></TabPanel>
           <TabPanel value="variants"><VariantsTab product={p} onSaved={refresh} /></TabPanel>
+          <TabPanel value="reviews"><ProductReviews product={p} /></TabPanel>
+          <TabPanel value="competitors"><ProductCompetitors product={p} /></TabPanel>
           <TabPanel value="intelligence"><IntelligenceTab product={p} /></TabPanel>
           <TabPanel value="creatives"><CreativesTab productId={p.id} /></TabPanel>
         </Tabs>
@@ -243,7 +255,7 @@ function IntelligenceTab({ product }: { product: Product }) {
       <Card className="flex flex-col gap-4 p-5 lg:sticky lg:top-0 lg:self-start">
         <h3 className="text-[15px] font-semibold">Run product research</h3>
         <p className="text-[13px] text-muted">Analysis uses only your product details plus anything you paste below. Inferences are listed separately as assumptions.</p>
-        <Field label="Customer reviews" hint="Paste reviews you have permission to use."><Textarea rows={4} value={reviews} onChange={(e) => setReviews(e.target.value)} placeholder="“Keeps my coffee hot all morning…”" /></Field>
+        <Field label="Customer reviews" hint="Leave empty to use the counted analysis from the Reviews tab, or paste a few reviews here."><Textarea rows={4} value={reviews} onChange={(e) => setReviews(e.target.value)} placeholder="“Keeps my coffee hot all morning…”" /></Field>
         <Field label="Competitors" hint="Names, claims, prices — your own notes."><Textarea rows={3} value={competitors} onChange={(e) => setCompetitors(e.target.value)} /></Field>
         <Field label="Notes"><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Launch in Germany; gift angle" /></Field>
         <Button variant="ai" onClick={run} disabled={caps.data?.text_ai === false}><Sparkles />Analyze product</Button>
@@ -272,7 +284,7 @@ function IntelligenceTab({ product }: { product: Product }) {
             <Section icon={<MessageSquareQuote />} title={`Review sentiment · ${r.result.review_sentiment?.overall ?? "no data"}`}>
               {r.result.review_sentiment?.positive_themes?.length ? <><div className="text-xs font-medium text-success">Positive</div><Bullets items={r.result.review_sentiment.positive_themes} /></> : null}
               {r.result.review_sentiment?.negative_themes?.length ? <><div className="mt-2 text-xs font-medium text-danger">Negative</div><Bullets items={r.result.review_sentiment.negative_themes} /></> : null}
-              {!r.result.review_sentiment?.positive_themes?.length && !r.result.review_sentiment?.negative_themes?.length && <span className="text-muted">Paste reviews to analyze sentiment.</span>}
+              {!r.result.review_sentiment?.positive_themes?.length && !r.result.review_sentiment?.negative_themes?.length && <span className="text-muted">Collect and analyse reviews in the Reviews tab, then run research again.</span>}
             </Section>
             <Section icon={<Lightbulb />} title="Pain points"><Bullets items={r.result.pain_points} /></Section>
             {!!r.result.competitor_comparison?.length && (

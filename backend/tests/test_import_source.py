@@ -96,6 +96,66 @@ def test_import_blocked_falls_back_to_id(client, monkeypatch):
     assert "CAPTCHA" in r.json()["import"]["note"]
 
 
+SAVED_AMAZON_PAGE = AMAZON_HTML.replace(
+    "<html><body>",
+    '<html><head><link rel="canonical" href="https://www.amazon.co.uk/Trailhead-Bottle/dp/B08N5WRWNW" /></head><body>'
+    '<input type="hidden" id="ASIN" name="ASIN" value="B08N5WRWNW">'
+    '<div data-hook="review"><i data-hook="review-star-rating"><span>2.0 out of 5 stars</span></i>'
+    '<a data-hook="review-title"><span>Lid leaks</span></a>'
+    '<span data-hook="review-body"><span>The lid leaked in my bag after a week.</span></span></div>')
+
+
+def test_identify_saved_pages():
+    from app.services import marketplace_scrape as ms
+    assert ms.identify_page(SAVED_AMAZON_PAGE) == ("amazon", "B08N5WRWNW", "https://www.amazon.co.uk/dp/B08N5WRWNW")
+    assert ms.identify_page(WALMART_HTML.replace('"product": {', '"product": {"usItemId": "5129928603", ')
+                            .replace("<body>", "<body><!-- walmart -->"))[:2] == ("walmart", "5129928603")
+    with pytest.raises(ms.ScrapeError, match="CAPTCHA"):
+        ms.identify_page("<html><body><h4>Enter the characters you see below</h4>" + "x" * 300 +
+                         "<form action='/errors/validateCaptcha'>captcha</form></body></html>")
+    with pytest.raises(ms.ScrapeError, match="recognise"):
+        ms.identify_page("<html><body><h1>My blog</h1>" + "x" * 300 + "</body></html>")
+
+
+def test_blocked_import_then_finish_from_browser_page(client, monkeypatch):
+    """Amazon blocks the automatic read -> placeholder saved -> user pastes the page from their browser -> filled in."""
+    from app.services import marketplace_scrape as ms
+
+    def blocked(url):
+        raise ms.ScrapeError("the marketplace showed a CAPTCHA / bot check instead of the product page")
+    monkeypatch.setattr(ms, "fetch_page", blocked)
+    _no_images(monkeypatch)
+    r = client.post("/api/products/import-source", json={"kind": "asin", "value": "B08N5WRWNW", "country": "UK"})
+    first = r.json()
+    assert r.status_code == 201 and first["import"]["blocked"] is True
+    assert first["import"]["page_url"] == "https://www.amazon.co.uk/dp/B08N5WRWNW"
+
+    # Wrong product page is refused instead of overwriting the placeholder.
+    wrong = SAVED_AMAZON_PAGE.replace("B08N5WRWNW", "B0ZZZZZZZZ")
+    r = client.post("/api/products/import-html", json={"html": wrong, "product_id": first["id"]})
+    assert r.status_code == 422 and "B0ZZZZZZZZ" in r.json()["detail"]
+
+    r = client.post("/api/products/import-html", json={"html": SAVED_AMAZON_PAGE, "product_id": first["id"]})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["id"] == first["id"] and body["name"] == "Trailhead 32oz Insulated Bottle"
+    assert body["features"][0] == "Keeps drinks cold 24 hours" and body["import"]["complete"] is True
+    assert body["reviews_imported"] == 1 and body["research_job_id"]
+    assert "saved from your browser" in body["import"]["note"]
+    # The page's reviews are stored for the Reviews tab too.
+    assert client.get(f"/api/products/{first['id']}/reviews/stats").json()["count"] == 1
+    from tests.conftest import run_pending_jobs
+    run_pending_jobs()  # drain the queued Deep Strategy job (no AI in tests) so later tests start clean
+
+
+def test_import_html_creates_new_product(client, monkeypatch):
+    _no_images(monkeypatch)
+    r = client.post("/api/products/import-html", json={"html": SAVED_AMAZON_PAGE})
+    assert r.status_code == 201, r.text
+    assert r.json()["asin"] == "B08N5WRWNW" and r.json()["source_url"] == "https://www.amazon.co.uk/dp/B08N5WRWNW"
+    assert client.post("/api/products/import-html", json={"html": "hello"}).status_code == 422
+
+
 def test_import_rejects_bad_ids(client):
     assert client.post("/api/products/import-source", json={"kind": "asin", "value": "nope"}).status_code == 422
     assert client.post("/api/products/import-source", json={"kind": "walmart", "value": "abc"}).status_code == 422

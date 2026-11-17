@@ -75,7 +75,22 @@ def test_provider(name: str, db: Session = Depends(get_db)) -> dict[str, Any]:
         return {"ok": False, "detail": "Not configured — add the required key/settings first.", "models": []}
     try:
         models = p.list_models(cfg)
-        return {"ok": True, "detail": f"Connected. {len(models)} eligible model(s).", "models": models[:100]}
+        detail = f"Connected. {len(models)} eligible model(s)."
+        row = db.get(ProviderConfig, name)
+        if row is not None:  # the key works now: clear the previous error and any cooldown it caused
+            row.last_error, row.consecutive_failures, row.circuit_open_until = None, 0, None
+        auto = getattr(p, "auto_model", None)
+        if auto and models and not p.info.paid:
+            chosen = auto(cfg, refresh=True)
+            if cfg.text_model and cfg.text_model not in models:
+                row = db.get(ProviderConfig, name)
+                if row is not None:
+                    row.text_model = None  # a saved model the key can't use would fail on every call
+                detail += (f" Your saved model '{cfg.text_model}' isn't available to this key, so Shelfcraft switched "
+                           f"to automatic: {chosen}.")
+            elif not cfg.text_model:
+                detail += f" Automatic model: {chosen}."
+        return {"ok": True, "detail": detail, "models": models[:100]}
     except ProviderError as e:
         return {"ok": False, "detail": e.message, "models": []}
 

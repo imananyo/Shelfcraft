@@ -97,7 +97,7 @@ def _mark(name: str, *, ok: bool, error: ProviderError | None = None) -> None:
             return
         if ok:
             row.last_success_at, row.consecutive_failures = now, 0
-            row.circuit_open_until = None
+            row.circuit_open_until, row.last_error = None, None  # a success makes the old error stale
             return
         row.last_failure_at = now
         row.last_error = (error.message if error else "unknown error")[:1000]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.ai.base import ProviderInfo, ProviderRuntimeConfig
 from app.ai.http import request_json
+from app.ai.model_health import AUTO
 from app.ai.openai_compat import OpenAICompatProvider
 
 
@@ -21,7 +22,9 @@ class OpenRouterProvider(OpenAICompatProvider):
         limits_note="':free' models: 20 req/min and 50 req/day (1,000/day only after buying credits — "
         "Shelfcraft never buys credits). Failed requests count toward the cap.",
         privacy_note="Hosted. Some free endpoints may log or train on prompts — check each model's provider page.",
-        default_text_model="meta-llama/llama-3.3-70b-instruct:free",
+        # Free models come and go (llama-3.3-70b-instruct left the free tier, Nov 2026): pick automatically from
+        # the models that are free right now. Paid versions are never used.
+        default_text_model=AUTO,
     )
 
     def allowed_model(self, model: str) -> bool:

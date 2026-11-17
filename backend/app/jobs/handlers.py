@@ -45,6 +45,38 @@ def h_research(ctx: JobContext) -> dict[str, Any]:
         raise PermanentJobError(str(e)) from e
 
 
+@job_handler("review_analysis")
+def h_review_analysis(ctx: JobContext) -> dict[str, Any]:
+    from app.services.review_analysis import analyze_product_reviews
+
+    p = ctx.payload
+    ctx.progress(0.02, "Loading reviews")
+    try:
+        rid = analyze_product_reviews(p["product_id"], provider=p.get("provider"), max_reviews=int(p.get("max_reviews") or 400),
+                                      progress=ctx.progress)
+    except ValueError as e:
+        raise PermanentJobError(str(e)) from e
+    with session_scope() as db:
+        _notify(db, "Review analysis ready", link=f"/products/{p['product_id']}?tab=reviews")
+    return {"research_id": rid}
+
+
+@job_handler("category_analysis")
+def h_category_analysis(ctx: JobContext) -> dict[str, Any]:
+    from app.services.category_analysis import analyze_category
+
+    p = ctx.payload
+    ctx.progress(0.02, "Loading top listings")
+    try:
+        rid = analyze_category(p["product_id"], provider=p.get("provider"), max_reviews=int(p.get("max_reviews") or 0),
+                               progress=ctx.progress)
+    except ValueError as e:
+        raise PermanentJobError(str(e)) from e
+    with session_scope() as db:
+        _notify(db, "Category analysis ready", link=f"/products/{p['product_id']}?tab=competitors")
+    return {"research_id": rid}
+
+
 @job_handler("listing_copy")
 def h_listing_copy(ctx: JobContext) -> dict[str, Any]:
     from app.services.copywriting import generate_listing_copy

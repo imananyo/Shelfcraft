@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ProviderConfig
 from app.db.session import get_db
-from app.routers.common import audit
+from app.routers.common import audit, get_or_404
 from app.routers.products import ProductIn, create_product, product_out
 
 router = APIRouter(tags=["integrations"])
@@ -267,11 +267,7 @@ IMAGE_CDN_HOSTS = ("media-amazon.com", "ssl-images-amazon.com", "images-amazon.c
 
 def _import_marketplace_page(db: Session, market: str, ident: str, url: str, brand_id: str | None) -> dict[str, Any]:
     """Read the public product page; if the marketplace blocks us, still save the product with its ID."""
-    from urllib.parse import urlparse
-
-    from app.db.models import Product, ProductImage
     from app.services import marketplace_scrape as ms
-    from app.services.assets import create_asset_from_bytes, sniff
 
     label = "Amazon" if market == "amazon" else "Walmart"
     id_spec = {} if market == "amazon" else {"Walmart item ID": ident}
@@ -282,21 +278,49 @@ def _import_marketplace_page(db: Session, market: str, ident: str, url: str, bra
                                        source_url=url, brand_id=brand_id, specifications=id_spec, tags=[market]), db)
         audit(db, "import_source", "Product", out["id"], kind=market, scraped=False)
         return {**out, "import": {"kind": "asin" if market == "amazon" else "walmart", "id": ident, "complete": False,
+                                  "blocked": True, "page_url": url,
                                   "note": f"Saved with the {label} ID, but couldn't read the product page: {e}. "
-                                          "Try again in a few minutes, or add details on the product page / Paste listing."}}
+                                          f"Finish the import from your own browser: open the {label} page, then save "
+                                          "or copy it into Shelfcraft (steps below)."}}
+    return _save_marketplace_data(db, market, ident, url, data, brand_id)
+
+
+def _save_marketplace_data(db: Session, market: str, ident: str, url: str, data: dict[str, Any], brand_id: str | None,
+                           product_id: str | None = None, via: str = "product page") -> dict[str, Any]:
+    """Create (or fill in an existing) product from parsed marketplace page data, import its images, and queue
+    Deep Strategy on its reviews."""
+    from urllib.parse import urlparse
+
+    from app.db.models import Product, ProductImage
+    from app.routers.products import ProductPatch, update_product
+    from app.services import marketplace_scrape as ms
+    from app.services.assets import create_asset_from_bytes, sniff
+
+    label = "Amazon" if market == "amazon" else "Walmart"
+    id_spec = {} if market == "amazon" else {"Walmart item ID": ident}
     specs = {**id_spec, **{k: v for k, v in (data.get("specifications") or {}).items() if k and v}}
     if data.get("brand"):
         specs.setdefault("Brand", data["brand"][:200])
     if data.get("rating"):
         specs["Customer rating"] = f"{data['rating']:g} / 5" + (f" ({data['review_count']} reviews)" if data.get("review_count") else "")
-    out = create_product(ProductIn(
-        name=data["name"][:200], asin=ident if market == "amazon" else None, source_url=url, brand_id=brand_id,
+    fields: dict[str, Any] = dict(
+        name=data["name"][:200], asin=ident if market == "amazon" else None, source_url=url,
         category=(data.get("category") or None) and data["category"][:120],
         description=(data.get("description") or None) and data["description"][:20000],
         features=[f[:500] for f in (data.get("features") or [])][:10],
         specifications={k[:60]: str(v)[:200] for k, v in list(specs.items())[:30]},
-        price=data.get("price"), currency=(data.get("currency") or "USD")[:8], tags=[market]), db)
+        price=data.get("price"), currency=(data.get("currency") or "USD")[:8])
+    if product_id:  # fill in the placeholder saved when the automatic read was blocked
+        existing = db.get(Product, product_id)
+        fields["specifications"] = {**(existing.specifications or {}), **fields["specifications"]} if existing else fields["specifications"]
+        fields["tags"] = sorted(set((existing.tags if existing else None) or []) | {market})
+        if brand_id:
+            fields["brand_id"] = brand_id
+        out = update_product(product_id, ProductPatch(**fields), db)
+    else:
+        out = create_product(ProductIn(**fields, brand_id=brand_id, tags=[market]), db)
     p = db.get(Product, out["id"])
+    start = len([i for i in p.images if i.role != "cutout"])
     images = 0
     for i, img in enumerate(data.get("images") or []):
         host = (urlparse(img).hostname or "").lower()
@@ -313,26 +337,64 @@ def _import_marketplace_page(db: Session, market: str, ident: str, url: str, bra
                                         product_id=p.id, tags=[market])
         except ValueError:
             continue
-        db.add(ProductImage(product_id=p.id, asset_id=a.id, role="main" if images == 0 else "reference", position=images))
+        db.add(ProductImage(product_id=p.id, asset_id=a.id, role="main" if start + images == 0 else "reference",
+                            position=start + images))
         images += 1
     db.flush()
     db.refresh(p)
     out = product_out(db, p)
     research_job = None
-    if data.get("reviews"):  # "reads your reviews": queue Deep Strategy on the scraped reviews
+    if data.get("reviews"):  # "reads your reviews": store them, then queue Deep Strategy on them
         from app.jobs.queue import enqueue
+        from app.services.reviews import save_reviews
+
+        save_reviews(db, p.id, data["reviews"], market)
 
         research_job = enqueue(db, "product_research", {"product_id": p.id, "reviews": ms.reviews_text(data["reviews"]),
-                                                        "competitors": "", "notes": f"Reviews read from the {label} product page.",
+                                                        "competitors": "", "notes": f"Reviews read from the {label} {via}.",
                                                         "provider": None}).id
-    audit(db, "import_source", "Product", out["id"], kind=market, scraped=True, images=images)
+    audit(db, "import_source", "Product", out["id"], kind=market, scraped=True, images=images, via=via)
     got = [x for x, ok in (("title", True), ("bullets", bool(data.get("features"))), ("description", bool(data.get("description"))),
                            ("price", data.get("price") is not None), ("specs", bool(data.get("specifications"))),
                            (f"{images} image(s)", images > 0),
                            (f"{len(data.get('reviews') or [])} reviews (Deep Strategy is analysing them)", bool(data.get("reviews")))) if ok]
     return {**out, "images_imported": images, "reviews_imported": len(data.get("reviews") or []), "research_job_id": research_job,
             "import": {"kind": "asin" if market == "amazon" else "walmart", "id": ident, "complete": True,
-                       "note": f"Imported from the {label} product page: {', '.join(got)}. Review before generating."}}
+                       "note": f"Imported from the {label} {via}: {', '.join(got)}. Review before generating."}}
+
+
+class PageHtmlIn(BaseModel):
+    html: str = Field(min_length=1, max_length=8_000_000)
+    brand_id: str | None = None
+    product_id: str | None = None  # fill in this product (e.g. the placeholder saved after a blocked import)
+
+
+@router.post("/products/import-html", status_code=201)
+def import_html(body: PageHtmlIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Import from a product page the user opened in their own browser and saved / copied (page source).
+
+    This is the fallback when our single automated request is answered with a bot check: the user visits the page
+    as a normal shopper, and Shelfcraft only parses what they hand over. Nothing is fetched except product images
+    from the marketplace image CDN.
+    """
+    from app.db.models import Product
+    from app.services import marketplace_scrape as ms
+
+    try:
+        market, ident, url = ms.identify_page(body.html)
+        data = (ms.parse_amazon if market == "amazon" else ms.parse_walmart)(body.html)
+    except ms.ScrapeError as e:
+        raise HTTPException(422, str(e)[:1].upper() + str(e)[1:] + ".") from e
+    url_to_keep = url
+    if body.product_id:
+        existing = get_or_404(db, Product, body.product_id)
+        url_to_keep = existing.source_url or url
+        expected = existing.asin if market == "amazon" else (existing.specifications or {}).get("Walmart item ID")
+        if expected and expected.upper() != ident.upper():
+            raise HTTPException(422, f"This page is for {'ASIN' if market == 'amazon' else 'Walmart item'} {ident}, "
+                                     f"but this product is {expected}. Open the right product page and try again.")
+    return _save_marketplace_data(db, market, ident, url_to_keep, data,
+                                  body.brand_id, product_id=body.product_id, via="page you saved from your browser")
 
 
 @router.post("/products/import-source", status_code=201)

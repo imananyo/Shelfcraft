@@ -66,14 +66,30 @@ def run_research(db: Session, product_id: str, *, reviews: str = "", competitors
     # Conditional instructions: small local models follow "if X is missing…" literally even when X is present,
     # so each instruction is only included when it applies.
     rules: list[str] = []
-    if reviews.strip():
+    stored = ""
+    if not reviews.strip():  # use the counted analysis of all stored reviews when nothing was pasted
+        from app.services.review_analysis import latest_review_summary
+
+        stored = latest_review_summary(db, product_id)
+    if stored:
+        review_block = f"Customer review analysis (themes counted across all stored reviews):\n{stored}"
+        rules.append("Base review_sentiment, pain_points and objections on this review analysis; mention the most "
+                     "frequent themes first and set overall to positive, mixed or negative.")
+    elif reviews.strip():
         review_block = f"Customer reviews supplied by the user:\n{reviews.strip()[:12000]}"
         rules.append("Analyze the supplied reviews: fill review_sentiment.positive_themes and negative_themes from them "
                      "and set overall to positive, mixed or negative.")
     else:
         review_block = "No customer reviews were supplied."
         rules.append("Set review_sentiment.overall to 'no data' and leave its theme lists empty.")
-    if competitors.strip():
+    from app.services.category_analysis import latest_category_summary
+
+    category = "" if competitors.strip() else latest_category_summary(db, product_id)
+    if category:
+        comp_block = f"Category analysis of top-performing competitor listings:\n{category}"
+        rules.append("Fill competitor_comparison from this category analysis (use 'Top listings' as the competitor name "
+                     "when no single competitor is named).")
+    elif competitors.strip():
         comp_block = f"Competitor information supplied by the user:\n{competitors.strip()[:8000]}"
         rules.append("Compare against each named competitor in competitor_comparison.")
     else:
@@ -91,7 +107,8 @@ def run_research(db: Session, product_id: str, *, reviews: str = "", competitors
     if not isinstance(data, dict):
         raise ValueError("model returned unexpected JSON")
     r = ProductResearch(product_id=p.id, kind="full", result=data, provider=res.provider, model=res.model,
-                        inputs={"reviews_chars": len(reviews), "competitors_chars": len(competitors),
+                        inputs={"reviews_chars": len(reviews) or len(stored), "review_analysis": bool(stored),
+                                "competitors_chars": len(competitors) or len(category), "category_analysis": bool(category),
                                 "notes": notes[:500], "used_product_fields": [k for k in ("description", "features",
                                 "benefits", "specifications") if getattr(p, k)]})
     db.add(r)
@@ -147,10 +164,22 @@ def generate_listing_copy(db: Session, product_id: str, brand_id: str | None, ma
     if p is None:
         raise ValueError("product not found")
     brand = db.get(Brand, brand_id) if brand_id else None
-    research = db.query(ProductResearch).filter(ProductResearch.product_id == p.id) \
+    from app.services.review_analysis import latest_review_summary
+
+    research = db.query(ProductResearch).filter(ProductResearch.product_id == p.id, ProductResearch.kind.notin_(("reviews", "category"))) \
         .order_by(ProductResearch.created_at.desc()).first()
     prompt = listing_prompt(p, brand, brand_context(db, brand_id), marketplace, opts,
                             research.result if research else None)
+    from app.services.category_analysis import latest_category_summary
+
+    voice = latest_review_summary(db, p.id)
+    if voice:
+        prompt += (f"\n\nVoice of the customer ({voice}) Address the most frequent complaints honestly in the copy "
+                   "where the product facts allow it, and lead with the most praised benefits.")
+    market = latest_category_summary(db, p.id)
+    if market:
+        prompt += (f"\n\nCategory benchmark from top-performing listings: {market} Use the missing keywords where they "
+                   "truthfully describe this product, and position against the competitor weaknesses.")
     if field:
         prompt += f"\n\nCurrent draft (keep consistent with it):\n{current or {}}\n\n{FIELD_PROMPTS[field]}"
         if opts.get("instruction"):
