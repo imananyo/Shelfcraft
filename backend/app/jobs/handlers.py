@@ -15,6 +15,15 @@ from app.services.assets import create_asset_from_bytes, load_image, register_fi
 
 
 def _notify(db: Any, title: str, body: str = "", link: str | None = None, level: str = "success") -> None:
+    """In-app notification, honouring Settings → Notifications (errors are always shown)."""
+    from app.db.models import UserSettings
+
+    s = db.query(UserSettings).first()
+    prefs = ((s.generation_defaults or {}).get("notify") if s else None) or {}
+    if level == "success" and prefs.get("success") is False:
+        return
+    if level == "warning" and prefs.get("warning") is False:
+        return
     db.add(Notification(level=level, title=title, body=body[:500], link=link))
 
 
@@ -275,3 +284,36 @@ def h_document_render(ctx: JobContext) -> dict[str, Any]:
         a = create_asset_from_bytes(db, png, ext="png", source="export", filename=f"{d.name}.png", title=d.name,
                                     project_id=d.project_id, meta={"document_id": d.id, "operation": "render"})
         return {"asset_id": a.id}
+
+
+@job_handler("listing_more_images", heavy=True)
+def h_listing_more_images(ctx: JobContext) -> dict[str, Any]:
+    """"Add more visuals" to an existing listing session, steered by a prompt; appended to the image set."""
+    from app.services.creative import generate_creative
+    from app.services.marketplaces import MARKETPLACES
+
+    p = ctx.payload
+    with session_scope() as db:
+        proj = db.get(Project, p["project_id"])
+        if proj is None:
+            raise PermanentJobError("listing project was deleted")
+        mk = MARKETPLACES.get((proj.data or {}).get("marketplace", "amazon"), MARKETPLACES["amazon"])
+        copy_ = (proj.data or {}).get("copy") or {}
+        product_id, brand_id = proj.product_id, proj.brand_id
+    try:
+        with session_scope() as db:
+            out = generate_creative(db, product_id=product_id, brand_id=brand_id, creative_type=p.get("creative_type", "lifestyle"),
+                                    width=mk["image_size"][0], height=mk["image_size"][1], style=p.get("style", "minimal"),
+                                    extra_prompt=p.get("prompt", ""), provider=p.get("provider"), copy=copy_,
+                                    project_id=p["project_id"], progress=ctx.progress)
+    except NoProviderAvailable as e:
+        raise PermanentJobError(f"{e}. Enable a free image provider or install the local model in Settings.") from e
+    except ValueError as e:
+        raise PermanentJobError(str(e)) from e
+    with session_scope() as db:
+        proj = db.get(Project, p["project_id"])
+        if proj:
+            data = dict(proj.data or {})
+            data["images"] = list(data.get("images") or []) + [{"slot": "extra", "prompt": p.get("prompt", ""), **out}]
+            proj.data = data
+    return out

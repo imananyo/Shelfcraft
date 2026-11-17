@@ -70,6 +70,8 @@ def check_request(request: Request) -> tuple[bool, str | None, int]:
     path = request.url.path
     if not path.startswith("/api") or path in PUBLIC_PATHS:
         return True, None, 200
+    if path.startswith("/api/share/") and request.method in ("GET", "HEAD"):
+        return True, None, 200  # public share links (token-checked in the share router)
     with session_scope() as db:
         if not team_mode_enabled(db):
             return True, None, 200

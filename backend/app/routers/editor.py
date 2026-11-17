@@ -224,7 +224,7 @@ def restore_revision(doc_id: str, rev_id: str, db: Session = Depends(get_db)) ->
 
 
 @router.get("/documents/{doc_id}/export")
-def export_document(doc_id: str, format: str = Query("png", pattern="^(png|jpeg|webp|json)$"),
+def export_document(doc_id: str, format: str = Query("png", pattern="^(png|jpeg|webp|json|svg)$"),
                     scale: float = Query(1.0, ge=0.1, le=2.0), quality: int = Query(92, ge=40, le=100),
                     save: bool = False, db: Session = Depends(get_db)) -> Response:
     d = get_or_404(db, EditorDocument, doc_id)
@@ -236,6 +236,12 @@ def export_document(doc_id: str, format: str = Query("png", pattern="^(png|jpeg|
         return Response(json.dumps({"shelfcraft_document": 1, "name": d.name, **doc}, ensure_ascii=False),
                         media_type="application/json",
                         headers={"Content-Disposition": f'attachment; filename="{safe}.json"'})
+    if format == "svg":  # layered vector export for Figma / Illustrator / Canva / Inkscape
+        from app.imaging.svg_export import document_to_svg
+
+        svg = document_to_svg(doc).encode("utf-8")
+        db.add(ExportRecord(kind="svg", source_type="document", source_id=d.id, params={"bytes": len(svg)}))
+        return Response(svg, media_type="image/svg+xml", headers={"Content-Disposition": f'attachment; filename="{safe}.svg"'})
     im = render_document(doc, scale=scale)
     buf = io.BytesIO()
     if format == "jpeg":

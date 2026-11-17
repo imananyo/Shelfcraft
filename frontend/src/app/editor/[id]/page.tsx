@@ -183,6 +183,7 @@ export default function EditorPage() {
             <MenuSeparator />
             <MenuItem onSelect={() => exportClient("png", true)}>Save PNG to library</MenuItem>
             <MenuItem icon={<LayoutTemplate />} onSelect={() => setSaveTemplateOpen(true)}>Save as template</MenuItem>
+            <MenuItem onSelect={async () => { await save({ silent: true }); download(`/documents/${id}/export?format=svg`).catch((e) => toast.error(e.message)); }}>SVG layers (Figma · Illustrator · Canva)</MenuItem>
             <MenuItem icon={<FileJson />} onSelect={async () => { await save({ silent: true }); download(`/documents/${id}/export?format=json`); }}>Project JSON</MenuItem>
           </Menu>
           <Button size="sm" onClick={() => save({ checkpoint: true, thumbnail: true })} loading={saveState === "saving"}><Save />Save</Button>

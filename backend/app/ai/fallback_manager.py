@@ -25,7 +25,7 @@ from app.ai.base import (
     TextRequest,
     TextResult,
 )
-from app.ai.provider_registry import PROVIDERS, get_provider, is_free_eligible, runtime_config
+from app.ai.provider_registry import PROVIDERS, get_provider, is_free_eligible, paid_allowed, runtime_config
 from app.ai.usage_tracker import record_attempt
 from app.db.models import ProviderConfig, UserSettings
 from app.db.session import session_scope
@@ -59,12 +59,19 @@ def candidate_order(kind: str, preferred: str | None) -> list[str]:
     for n, p in PROVIDERS.items():  # local providers are always the last resort
         if p.info.local and n not in names:
             names.append(n)
-    return [n for n in names if kind in PROVIDERS[n].info.kinds]
+    # Paid providers only ever run when the user picked them explicitly for this request.
+    return [n for n in names if kind in PROVIDERS[n].info.kinds and (not PROVIDERS[n].info.paid or n == preferred)]
 
 
-def _skip_reason(name: str) -> str | None:
+def _skip_reason(name: str, explicit: bool = False) -> str | None:
     p = get_provider(name)
-    if not is_free_eligible(p):
+    if p.info.paid:
+        if not explicit:
+            return "paid provider — only used when you select it explicitly"
+        with session_scope() as db:
+            if not paid_allowed(db):
+                return "paid provider — turn on \"Allow paid providers\" in Settings first"
+    elif not is_free_eligible(p):
         return "not verified free — blocked by free-only policy"
     now = datetime.now(timezone.utc)
     with session_scope() as db:
@@ -110,7 +117,7 @@ def _run(kind: str, purpose: str, preferred: str | None, call: Callable[[str], T
     attempts: list[dict[str, Any]] = []
     names = [preferred] if (strict and preferred) else candidate_order(kind, preferred)
     for name in names:
-        reason = _skip_reason(name)
+        reason = _skip_reason(name, explicit=(name == preferred))
         if reason:
             attempts.append({"provider": name, "error": reason, "skipped": True})
             continue

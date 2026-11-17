@@ -127,6 +127,7 @@ class ProviderInfo:
     default_text_model: str | None = None
     default_image_model: str | None = None
     vision: bool = False
+    paid: bool = False  # opt-in paid provider: never in the automatic fallback chain
 
 
 @dataclass

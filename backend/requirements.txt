@@ -7,6 +7,7 @@ python-multipart>=0.0.12
 sqlalchemy>=2.0.36
 alembic>=1.14
 httpx>=0.28
+beautifulsoup4>=4.12
 
 # Imaging / documents
 pillow>=11.0

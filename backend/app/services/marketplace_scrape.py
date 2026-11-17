@@ -1,0 +1,240 @@
+"""Read a public Amazon / Walmart product page and turn it into product fields.
+
+One plain GET per import with ordinary browser headers. If the marketplace answers with a CAPTCHA or block
+page we stop and report it; there is deliberately no proxy rotation, CAPTCHA solving or retry loop. Automated
+access may conflict with the marketplace's terms of use; it is enabled here at the user's request.
+"""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+import httpx
+from bs4 import BeautifulSoup
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/130.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+BLOCK_MARKERS = ("captcha", "robot check", "api-services-support@amazon.com", "verify your identity",
+                 "press & hold", "px-captcha", "are you a human")
+
+
+class ScrapeError(ValueError):
+    pass
+
+
+def _clean(s: str | None) -> str | None:
+    if not s:
+        return None
+    s = re.sub(r"\s+", " ", s.replace("‎", "").replace("‏", "")).strip()
+    return s or None
+
+
+def _price(s: Any) -> float | None:
+    if s is None:
+        return None
+    if isinstance(s, (int, float)):
+        return float(s)
+    m = re.search(r"\d[\d,]*(?:\.\d+)?", str(s))
+    try:
+        return float(m.group(0).replace(",", "")) if m else None
+    except ValueError:
+        return None
+
+
+def fetch_page(url: str) -> str:
+    try:
+        with httpx.Client(timeout=20.0, follow_redirects=True, headers=HEADERS) as c:
+            r = c.get(url)
+    except httpx.HTTPError as e:
+        raise ScrapeError(f"couldn't reach the page ({type(e).__name__})") from e
+    if r.status_code == 404:
+        raise ScrapeError("product not found (HTTP 404) — check the ID and marketplace country")
+    if r.status_code >= 400:
+        raise ScrapeError(f"the marketplace declined the request (HTTP {r.status_code})")
+    html = r.text[:4_000_000]
+    head = html[:200_000].lower()
+    if any(m in head for m in BLOCK_MARKERS) and "producttitle" not in head and "__next_data__" not in head:
+        raise ScrapeError("the marketplace showed a CAPTCHA / bot check instead of the product page")
+    return html
+
+
+# ---------------------------------------------------------------- JSON-LD (works on many stores)
+def _jsonld_product(soup: BeautifulSoup) -> dict[str, Any]:
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(tag.string or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        stack = data if isinstance(data, list) else [data]
+        while stack:
+            d = stack.pop()
+            if isinstance(d, dict):
+                if "@graph" in d:
+                    stack.extend(d["@graph"] if isinstance(d["@graph"], list) else [d["@graph"]])
+                t = d.get("@type")
+                if t == "Product" or (isinstance(t, list) and "Product" in t):
+                    return d
+            elif isinstance(d, list):
+                stack.extend(d)
+    return {}
+
+
+def _from_jsonld(p: dict[str, Any]) -> dict[str, Any]:
+    if not p:
+        return {}
+    offers = p.get("offers") or {}
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+    imgs = p.get("image") or []
+    imgs = [imgs] if isinstance(imgs, str) else [i.get("url") if isinstance(i, dict) else i for i in imgs]
+    brand = p.get("brand")
+    return {"name": _clean(p.get("name")), "description": _clean(p.get("description")),
+            "brand": _clean(brand.get("name") if isinstance(brand, dict) else brand),
+            "price": _price(offers.get("price") or (offers.get("priceSpecification") or {}).get("price")),
+            "currency": offers.get("priceCurrency"), "images": [i for i in imgs if i], "category": _clean(p.get("category"))}
+
+
+# ---------------------------------------------------------------- Amazon
+def parse_amazon(html: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html, "html.parser")
+    out = _from_jsonld(_jsonld_product(soup))
+    t = soup.select_one("#productTitle")
+    if t:
+        out["name"] = _clean(t.get_text())
+    bullets = [_clean(li.get_text()) for li in soup.select("#feature-bullets li span.a-list-item")]
+    out["features"] = [b for b in bullets if b and len(b) > 3][:10]
+    d = soup.select_one("#productDescription")
+    if d and _clean(d.get_text()):
+        out["description"] = _clean(d.get_text())
+    pr = soup.select_one("#corePrice_feature_div span.a-offscreen, #corePriceDisplay_desktop_feature_div span.a-offscreen, "
+                         "span.a-price span.a-offscreen, #priceblock_ourprice, #priceblock_dealprice")
+    if pr and _price(pr.get_text()):
+        out["price"] = _price(pr.get_text())
+    by = soup.select_one("#bylineInfo")
+    if by:
+        out["brand"] = _clean(re.sub(r"^(Visit the|Brand:)\s*|\s*Store$", "", by.get_text().strip()))
+    crumbs = [_clean(a.get_text()) for a in soup.select("#wayfinding-breadcrumbs_feature_div a")]
+    if crumbs:
+        out["category"] = crumbs[-1]
+    specs: dict[str, str] = {}
+    for tr in soup.select("#productOverview_feature_div tr, #productDetails_techSpec_section_1 tr, "
+                          "#productDetails_detailBullets_sections1 tr"):
+        k, v = tr.find(["th", "td"]), tr.find_all("td")
+        if k and v:
+            kk, vv = _clean(k.get_text()), _clean(v[-1].get_text())
+            if kk and vv and kk != vv and len(specs) < 25 and "review" not in kk.lower():
+                specs[kk[:60]] = vv[:200]
+    for li in soup.select("#detailBullets_feature_div li"):
+        parts = [_clean(s.get_text()) for s in li.select("span.a-list-item > span")]
+        if len(parts) >= 2 and parts[0] and parts[1] and len(specs) < 25:
+            specs[parts[0].rstrip(" :")[:60]] = parts[1][:200]
+    specs.pop("Customer Reviews", None)
+    specs.pop("Best Sellers Rank", None)
+    out["specifications"] = specs
+    imgs = re.findall(r'"hiRes":"(https://[^"]+)"', html) or re.findall(r'"large":"(https://[^"]+)"', html)
+    if not imgs:
+        m = soup.select_one("#landingImage")
+        if m:
+            dyn = m.get("data-a-dynamic-image")
+            imgs = list(json.loads(dyn).keys()) if dyn else [m.get("data-old-hires") or m.get("src")]
+    out["images"] = list(dict.fromkeys(i for i in (imgs or out.get("images") or []) if i))[:8]
+    rating = soup.select_one("#acrPopover")
+    if rating and rating.get("title"):
+        out["rating"] = _price(rating["title"])
+    cnt = soup.select_one("#acrCustomerReviewText")
+    if cnt:
+        out["review_count"] = int(_price(cnt.get_text()) or 0) or None
+    reviews = []
+    for rv in soup.select('[data-hook="review"]'):
+        body = rv.select_one('[data-hook="review-body"]')
+        stars = rv.select_one('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')
+        title = rv.select_one('[data-hook="review-title"]')
+        text = _clean(body.get_text(" ")) if body else None
+        if text:
+            reviews.append({"rating": _price(stars.get_text()) if stars else None,
+                            "title": _clean(title.get_text(" ")) if title else None, "text": text[:2000]})
+    out["reviews"] = reviews[:20]
+    if not out.get("name"):
+        raise ScrapeError("couldn't find the product on that Amazon page (layout changed or blocked)")
+    return out
+
+
+# ---------------------------------------------------------------- Walmart
+def parse_walmart(html: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html, "html.parser")
+    out = _from_jsonld(_jsonld_product(soup))
+    nd = soup.find("script", id="__NEXT_DATA__")
+    if nd and nd.string:
+        try:
+            data = json.loads(nd.string)["props"]["pageProps"]["initialData"]["data"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            data = {}
+        prod = data.get("product") or {}
+        if prod:
+            out["name"] = _clean(prod.get("name")) or out.get("name")
+            out["brand"] = _clean(prod.get("brand")) or out.get("brand")
+            price = ((prod.get("priceInfo") or {}).get("currentPrice") or {})
+            out["price"] = _price(price.get("price")) or out.get("price")
+            out["currency"] = price.get("currencyUnit") or out.get("currency")
+            imgs = [i.get("url") for i in (prod.get("imageInfo") or {}).get("allImages") or [] if i.get("url")]
+            if imgs:
+                out["images"] = imgs
+            path = (prod.get("category") or {}).get("path") or []
+            if path:
+                out["category"] = _clean(path[-1].get("name"))
+            short = prod.get("shortDescription")
+            if short:
+                out["description"] = _clean(BeautifulSoup(short, "html.parser").get_text(" "))
+        idml = data.get("idml") or {}
+        long = idml.get("longDescription")
+        if long:
+            ls = BeautifulSoup(long, "html.parser")
+            feats = [_clean(li.get_text()) for li in ls.find_all("li")]
+            out["features"] = [f for f in feats if f][:10]
+            if not out.get("description"):
+                out["description"] = _clean(ls.get_text(" "))
+        if not out.get("features") and (prod.get("shortDescription") or ""):
+            feats = [_clean(li.get_text()) for li in BeautifulSoup(prod["shortDescription"], "html.parser").find_all("li")]
+            out["features"] = [f for f in feats if f][:10]
+        specs = {}
+        for s in idml.get("specifications") or []:
+            if s.get("name") and s.get("value") and len(specs) < 25:
+                specs[str(s["name"])[:60]] = str(s["value"])[:200]
+        out["specifications"] = specs
+        rv = data.get("reviews") or {}
+        out["rating"] = _price(rv.get("averageOverallRating") or (prod.get("averageRating")))
+        out["review_count"] = rv.get("totalReviewCount") or prod.get("numberOfReviews")
+        out["reviews"] = [{"rating": _price(r.get("rating")), "title": _clean(r.get("reviewTitle")),
+                           "text": _clean(r.get("reviewText"))[:2000]}
+                          for r in (rv.get("customerReviews") or []) + (rv.get("topPositiveReview") and [rv["topPositiveReview"]] or [])
+                          + (rv.get("topNegativeReview") and [rv["topNegativeReview"]] or [])
+                          if isinstance(r, dict) and _clean(r.get("reviewText"))][:20]
+    out["images"] = list(dict.fromkeys(out.get("images") or []))[:8]
+    if not out.get("name"):
+        raise ScrapeError("couldn't find the product on that Walmart page (layout changed or blocked)")
+    return out
+
+
+def reviews_text(reviews: list[dict[str, Any]]) -> str:
+    """Format scraped reviews the way the research form expects pasted reviews."""
+    lines = []
+    for r in reviews:
+        head = f"{r['rating']:g}★ " if r.get("rating") else ""
+        head += f"{r['title']}: " if r.get("title") else ""
+        lines.append(f"{head}{r['text']}")
+    return "\n\n".join(lines)[:20000]
+
+
+def download_image(url: str) -> bytes | None:
+    try:
+        r = httpx.get(url, timeout=20, headers=HEADERS, follow_redirects=True)
+    except httpx.HTTPError:
+        return None
+    if r.status_code != 200 or len(r.content) > 15_000_000:
+        return None
+    return r.content

@@ -1,6 +1,6 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { ClipboardPaste, Download, FileSpreadsheet, Globe, LayoutGrid, List, Package, Plus, Search, ShoppingBag, Upload } from "lucide-react";
+import { ClipboardPaste, Download, Factory, FileSpreadsheet, Globe, LayoutGrid, List, Package, Plus, Search, ShoppingBag, Sparkles, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -10,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Dropzone } from "@/components/ui/dropzone";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Badge, Card, EmptyState, ErrorState, Notice, PageHeader, Skeleton } from "@/components/ui/misc";
-import { Dialog } from "@/components/ui/overlay";
-import { download, post, upload } from "@/lib/api";
+import { Confirm, Dialog } from "@/components/ui/overlay";
+import { del, download, post, upload } from "@/lib/api";
 import { useActiveBrand, useApi } from "@/lib/hooks";
 import type { Product } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/utils";
@@ -25,6 +25,20 @@ export default function ProductsPage() {
   const [view, setView] = React.useState<"grid" | "list">("grid");
   const [adding, setAdding] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
+  const [sel, setSel] = React.useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = React.useState(false);
+  const qcBulk = useQueryClient();
+  const toggleSel = (id: string) => setSel((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const bulkListings = async () => {
+    try { const r = await post<{ batch_id: string; total: number }>("/listings/bulk", { product_ids: [...sel] }); toast.success(`Writing ${r.total} listings in the background — track them in Factory`); setSel(new Set()); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  const bulkDelete = async () => {
+    let n = 0;
+    for (const id of sel) { try { await del(`/products/${id}`); n++; } catch { /* keep going */ } }
+    toast.success(`Deleted ${n} product${n === 1 ? "" : "s"}`); setSel(new Set()); setConfirmBulk(false);
+    qcBulk.invalidateQueries({ queryKey: ["products"] });
+  };
   React.useEffect(() => { const t = setTimeout(() => setDebounced(q), 200); return () => clearTimeout(t); }, [q]);
   const params = new URLSearchParams({ sort });
   if (debounced) params.set("q", debounced);
@@ -49,6 +63,20 @@ export default function ProductsPage() {
           {(["grid", "list"] as const).map((v) => <button key={v} aria-label={`${v} view`} onClick={() => setView(v)} className={cn("flex size-8 items-center justify-center rounded-[8px] text-muted", view === v && "bg-sunken text-foreground")}>{v === "grid" ? <LayoutGrid className="size-4" /> : <List className="size-4" />}</button>)}
         </div>
       </div>
+      {!!list.data?.items.length && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2"><input type="checkbox" className="size-4 accent-[var(--primary)]" aria-label="Select all products"
+            checked={sel.size > 0 && sel.size === list.data.items.length} onChange={(e) => setSel(e.target.checked ? new Set(list.data!.items.map((p) => p.id)) : new Set())} />
+            {sel.size ? `${sel.size} selected` : "Select all"}</label>
+          {sel.size > 0 && <>
+            <Button size="sm" variant="ai" onClick={bulkListings}><Sparkles />Write listings</Button>
+            <Link href="/factory"><Button size="sm" variant="outline"><Factory />Open Factory</Button></Link>
+            <Button size="sm" variant="outline" onClick={() => setConfirmBulk(true)}><Trash2 />Delete</Button>
+            <Button size="sm" variant="ghost" onClick={() => setSel(new Set())}>Clear</Button>
+          </>}
+        </div>
+      )}
+      <Confirm open={confirmBulk} onOpenChange={setConfirmBulk} title={`Delete ${sel.size} product(s)?`} body="They move to trash; generated images stay in the library." onConfirm={bulkDelete} />
       {list.error && <ErrorState error={list.error} onRetry={() => list.refetch()} />}
       {list.isLoading ? <div className="grid grid-cols-2 gap-4 md:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-60" />)}</div>
         : list.data?.items.length === 0 ? (
@@ -57,8 +85,10 @@ export default function ProductsPage() {
         ) : view === "grid" ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
             {list.data?.items.map((p) => (
-              <Link key={p.id} href={`/products/${p.id}`}>
-                <Card className="group overflow-hidden transition hover:border-border-strong">
+              <div key={p.id} className="relative">
+                <input type="checkbox" className="absolute left-2 top-2 z-10 size-4 accent-[var(--primary)]" aria-label={`Select ${p.name}`} checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} />
+                <Link href={`/products/${p.id}`}>
+                <Card className={cn("group overflow-hidden transition hover:border-border-strong", sel.has(p.id) && "ring-3 ring-[var(--ring)]")}>
                   <ImageThumb src={p.cover_url} alt={p.name} className="aspect-square rounded-none border-0" />
                   <div className="p-3">
                     <div className="truncate text-[13.5px] font-semibold">{p.name}</div>
@@ -69,16 +99,18 @@ export default function ProductsPage() {
                     <div className="mt-2 flex gap-1.5">{p.brand_name && <Badge>{p.brand_name}</Badge>}{!p.image_count && <Badge tone="warning">No photo</Badge>}{p.variant_count > 0 && <Badge>{p.variant_count} variants</Badge>}</div>
                   </div>
                 </Card>
-              </Link>
+                </Link>
+              </div>
             ))}
           </div>
         ) : (
           <Card className="overflow-x-auto">
             <table className="w-full text-[13px]">
-              <thead className="border-b border-border text-left text-xs text-muted"><tr><th className="px-4 py-2.5 font-medium">Product</th><th className="px-3 font-medium">SKU</th><th className="px-3 font-medium">Category</th><th className="px-3 font-medium">Brand</th><th className="px-3 text-right font-medium">Price</th><th className="px-4 text-right font-medium">Updated</th></tr></thead>
+              <thead className="border-b border-border text-left text-xs text-muted"><tr><th className="w-8 pl-4"><span className="sr-only">Select</span></th><th className="px-4 py-2.5 font-medium">Product</th><th className="px-3 font-medium">SKU</th><th className="px-3 font-medium">Category</th><th className="px-3 font-medium">Brand</th><th className="px-3 text-right font-medium">Price</th><th className="px-4 text-right font-medium">Updated</th></tr></thead>
               <tbody>
                 {list.data?.items.map((p) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-sunken/60">
+                    <td className="pl-4"><input type="checkbox" className="size-4 accent-[var(--primary)]" aria-label={`Select ${p.name}`} checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
                     <td className="px-4 py-2"><Link href={`/products/${p.id}`} className="flex items-center gap-3 font-medium"><ImageThumb src={p.cover_url} alt={p.name} className="size-9" />{p.name}</Link></td>
                     <td className="px-3 font-mono text-xs">{p.sku ?? "—"}</td><td className="px-3">{p.category ?? "—"}</td><td className="px-3">{p.brand_name ?? "—"}</td>
                     <td className="px-3 text-right tabular-nums">{p.price != null ? `${p.currency} ${p.price.toFixed(2)}` : "—"}</td>
@@ -172,7 +204,6 @@ function AddProductDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
 }
 
 function ImportOptions({ onImported }: { onImported: (id: string) => void }) {
-  const amazon = useApi<{ enabled: boolean }>(["spapi"], "/integrations/amazon");
   const [mode, setMode] = React.useState<"" | "paste" | "asin">("");
   const [text, setText] = React.useState("");
   const [asin, setAsin] = React.useState("");
@@ -183,7 +214,7 @@ function ImportOptions({ onImported }: { onImported: (id: string) => void }) {
     try {
       const p = mode === "paste"
         ? await post<Product & { note: string }>("/products/import-text", { text })
-        : await post<Product & { images_imported: number }>("/integrations/amazon/import", { asin: asin.trim().toUpperCase(), country });
+        : await post<Product & { images_imported?: number; import?: { note: string } }>("/products/import-source", { kind: "asin", value: asin.trim(), country });
       toast.success(mode === "paste" ? "Product created from pasted text — review the fields and add photos" : "Imported from Amazon");
       onImported(p.id);
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
@@ -201,15 +232,13 @@ function ImportOptions({ onImported }: { onImported: (id: string) => void }) {
           <p className="text-[11px] text-muted">Parsed on this computer without AI — title, bullets, specs (e.g. “Material: Bamboo”) and price.</p>
         </div>
       )}
-      {mode === "asin" && (amazon.data?.enabled ? (
+      {mode === "asin" && (
         <div className="flex gap-2">
-          <Input value={asin} onChange={(e) => setAsin(e.target.value)} placeholder="ASIN, e.g. B0XXXXXXXX" className="flex-1" />
+          <Input value={asin} onChange={(e) => setAsin(e.target.value)} placeholder="ASIN or Amazon link, e.g. B0XXXXXXXX" className="flex-1" />
           <Select value={country} onChange={(e) => setCountry(e.target.value)} className="w-20" aria-label="Marketplace">{["US", "CA", "MX", "UK", "DE", "FR", "IT", "ES", "IN", "AE", "JP", "AU"].map((c) => <option key={c}>{c}</option>)}</Select>
-          <Button onClick={run} loading={busy} disabled={!/^[A-Za-z0-9]{10}$/.test(asin.trim())}>Import</Button>
+          <Button onClick={run} loading={busy} disabled={!asin.trim()}>Import</Button>
         </div>
-      ) : (
-        <Notice tone="warning" className="text-[12.5px]">ASIN import uses Amazon&apos;s official Selling Partner API with <b>your own</b> seller credentials. Set it up in <Link className="underline" href="/settings?tab=integrations">Settings → Integrations</Link>. Shelfcraft never scrapes Amazon pages — or use <b>Paste a listing</b>.</Notice>
-      ))}
+      )}
     </div>
   );
 }

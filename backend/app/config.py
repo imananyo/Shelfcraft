@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     # Provider credentials — optional; providers stay disabled without them.
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
+    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    nano_banana_api_key: str | None = Field(default=None, validation_alias="NANO_BANANA_API_KEY")
     groq_api_key: str | None = Field(default=None, validation_alias="GROQ_API_KEY")
     openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
     mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")

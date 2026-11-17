@@ -12,6 +12,7 @@ from app.routers import (
     listings,
     products,
     providers,
+    share,
     system,
     videos,
 )
@@ -32,5 +33,6 @@ ROUTERS = [
     videos.router,
     jobs.router,
     providers.router,
+    share.router,
     public_api.manage,
 ]

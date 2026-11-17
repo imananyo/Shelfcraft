@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.ai.base import ProviderError
-from app.ai.provider_registry import PROVIDERS, get_provider, is_free_eligible, provider_status, runtime_config
+from app.ai.provider_registry import PROVIDERS, get_provider, is_usable, provider_status, runtime_config
 from app.ai.usage_tracker import usage_summary
 from app.db.models import ProviderConfig, UserSettings
 from app.db.session import get_db
@@ -38,7 +38,10 @@ def update_provider(name: str, body: ProviderPatch, db: Session = Depends(get_db
     row = db.get(ProviderConfig, name) or ProviderConfig(name=name)
     db.add(row)
     data = body.model_dump(exclude_unset=True)
-    if data.get("enabled") and not is_free_eligible(p):
+    if data.get("enabled") and not is_usable(db, p):
+        if p.info.paid:
+            raise HTTPException(422, f"{p.info.label} costs money per call. Turn on \"Allow paid providers\" in "
+                                     "Settings → Providers first.")
         raise HTTPException(422, f"{p.info.label} cannot be enabled: its free tier is not verified "
                                  f"(checked {p.info.verified_on}). Shelfcraft only uses free or local providers.")
     if "enabled" in data:

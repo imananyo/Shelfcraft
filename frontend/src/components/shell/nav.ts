@@ -1,5 +1,5 @@
 import {
-  Clapperboard, Factory, FileText, FlaskConical, Gauge, History, Images, LayoutDashboard, LayoutTemplate, Library,
+  BookOpen, Clapperboard, Factory, FileText, FlaskConical, Gauge, History, Images, LayoutDashboard, LayoutTemplate, Library,
   ListChecks, Megaphone, Package, Palette, PenLine, ScanSearch, Settings, Sparkles, SquareStack, WandSparkles, Workflow, type LucideIcon,
 } from "lucide-react";
 
@@ -47,7 +47,7 @@ export const NAV: NavGroup[] = [
       { href: "/jobs", label: "Jobs", icon: ListChecks },
     ],
   },
-  { label: "System", items: [{ href: "/settings", label: "Settings", icon: Settings }] },
+  { label: "System", items: [{ href: "/resources", label: "Guides", icon: BookOpen }, { href: "/settings", label: "Settings", icon: Settings }] },
 ];
 
 export const ALL_NAV = NAV.flatMap((g) => g.items);

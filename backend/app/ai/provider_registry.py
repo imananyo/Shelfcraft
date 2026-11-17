@@ -14,6 +14,7 @@ from app.ai.local_diffusion_provider import LocalDiffusionProvider, diffusers_av
 from app.ai.mistral_provider import MistralProvider
 from app.ai.ollama_provider import OllamaProvider
 from app.ai.openrouter_provider import OpenRouterProvider
+from app.ai.paid_providers import NanoBananaProvider, OpenAIProvider
 from app.config import get_settings
 from app.db.models import ProviderConfig
 
@@ -27,6 +28,8 @@ PROVIDERS: dict[str, Provider] = {
         CloudflareProvider(),
         MistralProvider(),
         LocalDiffusionProvider(),
+        NanoBananaProvider(),
+        OpenAIProvider(),
     )
 }
 
@@ -42,11 +45,25 @@ def is_free_eligible(p: Provider) -> bool:
     return p.info.local or p.info.free_tier_verified
 
 
+def paid_allowed(db: Session) -> bool:
+    """Master switch (Settings → Providers → "Allow paid providers"), off by default."""
+    from app.db.models import UserSettings
+
+    s = db.query(UserSettings).first()
+    return bool(s and (s.generation_defaults or {}).get("allow_paid_providers"))
+
+
+def is_usable(db: Session, p: Provider) -> bool:
+    return is_free_eligible(p) or (p.info.paid and paid_allowed(db))
+
+
 def _env_key(name: str) -> tuple[str | None, dict[str, Any]]:
     s = get_settings()
     extra: dict[str, Any] = {}
     key = {
         "gemini": s.gemini_api_key,
+        "nano_banana": s.nano_banana_api_key,
+        "openai": s.openai_api_key,
         "groq": s.groq_api_key,
         "openrouter": s.openrouter_api_key,
         "mistral": s.mistral_api_key,
@@ -101,8 +118,8 @@ def provider_status(db: Session, name: str) -> dict[str, Any]:
     rl = _aware(row.rate_limited_until) if row else None
     co = _aware(row.circuit_open_until) if row else None
     configured = p.is_configured(cfg)
-    if not is_free_eligible(p):
-        state = "ineligible"
+    if not is_usable(db, p):
+        state = "paid_locked" if p.info.paid else "ineligible"
     elif not cfg.enabled:
         state = "disabled"
     elif not configured:
@@ -128,6 +145,7 @@ def provider_status(db: Session, name: str) -> dict[str, Any]:
         "license_note": i.license_note,
         "requires_key": i.requires_key,
         "vision": i.vision,
+        "paid": i.paid,
         "enabled": cfg.enabled,
         "has_key": bool(cfg.api_key),
         "key_source": "env" if env_key else ("settings" if row and row.api_key else None),

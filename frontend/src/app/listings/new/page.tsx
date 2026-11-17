@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { ImportProductCard } from "@/components/import-product-card";
 import { QuickAddProduct } from "@/components/quick-add-product";
 import { BrandSelect, ProductSelect } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ function NewListing() {
       <PageHeader eyebrow={<Link href="/listings" className="hover:text-foreground">Listing builder</Link>} title="New listing" description="Copy is generated in the background — you can keep working while it runs." />
       <div className="flex flex-col gap-6">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{MK.map((m) => <OptionCard key={m.key} icon={m.icon} title={m.title} selected={mk === m.key} onClick={() => setMk(m.key)} className="flex-col items-start" />)}</div>
+        <ImportProductCard country={o.country} brandId={brandId} onImported={(id, kind) => { setProductId(id); if (kind === "asin") setMk("amazon"); else if (kind === "walmart") setMk("walmart"); }} />
         <Card className="flex flex-col gap-4 p-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Product *" aside={<QuickAddProduct onCreated={setProductId} />}><ProductSelect value={productId} onChange={setProductId} /></Field>

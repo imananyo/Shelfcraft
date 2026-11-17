@@ -1,6 +1,6 @@
 # Feature Status
 
-Status as of **2026-11-13**. "Verified" means exercised by automated tests and/or a real run with
+Status as of **2026-11-16**. "Verified" means exercised by automated tests and/or a real run with
 the actual local models on this machine (see `TEST_REPORT.md`).
 
 Legend: ✅ fully implemented · 🟡 implemented with limitations · 🔑 waiting for optional API configuration · ❌ not implemented
@@ -12,7 +12,7 @@ Legend: ✅ fully implemented · 🟡 implemented with limitations · 🔑 waiti
 | 1 | App shell & dashboard | ✅ | Collapsible sidebar (persisted), brand switcher, Ctrl+K search (products/brands/projects/assets/pages), live job tray, notifications, theme (light/dark/system), profile card. Dashboard: real counts, onboarding checklist computed from data, recent creatives/projects/products, job status, 30-day usage. |
 | 2 | Brand workspace | ✅ | Multiple brands, logo upload, guideline docs (PDF/TXT/MD text extracted locally), colors (≤6), heading/body fonts, language, tagline, tone, audience, positioning, values, aesthetic, visual identity, marketing rules. Active brand is injected into every generation prompt and template. Website auto-fill reads public metadata only. |
 | 3 | Product workspace | ✅ | CRUD, photos (upload, set main, remove), variants (attributes + color), specs, features/benefits, pricing, SKU/ASIN, categories, tags, search/filter/sort, grid/list, duplicate, CSV import (upsert by SKU, per-row errors) & export. |
-| 3b | URL / ASIN product research | 🟡 | Public product-page metadata (title, description, price, image URL) from permitted sites. **Amazon/Walmart are refused by design** (their terms prohibit automated access) — enter details manually or via CSV. |
+| 3b | Import by ASIN / Walmart ID / URL | 🟡 | Listing builder + Products page. Reads the public Amazon/Walmart product page (title, bullets, description, price, brand, specs, up to 8 images, rating and reviews → auto Deep Strategy). One plain request; CAPTCHA/block pages are reported, never bypassed, and the product is still saved with its ID. May conflict with marketplace terms — enabled at the owner's request (2026-11-16). Amazon SP-API used instead when connected. |
 | 4 | AI product intelligence | ✅ | Personas, positioning, USPs, benefits from features, review sentiment (only from reviews you paste), pain points, objections + answers, competitor gaps (only from notes you paste), marketing angles, creative strategy, explicit **assumptions** list, record of which inputs were used. Verified with Ollama qwen2.5:3b. |
 | 5 | AI listing builder | ✅ | Amazon / Shopify / Walmart / TikTok Shop; country & language; title, 5 bullets, description, keywords, search terms (byte count), benefits, feature explanations, image strategy, structure, recommendations, assumptions. Per-field regenerate with instructions, manual edit, versions + restore, copy, TXT/CSV/JSON export, length guidance (not compliance claims). |
 | 6 | Main image generator | ✅ | White-bg main (rembg cut-out on pure white, ~85% fill), hero, lifestyle, studio, detail, promo, social, ad sizes; size presets; style; brand styling; prompt direction or full prompt; seed; count 1–4; provider choice; history; download; editable layered version of every result; provider/model attribution. |
@@ -50,11 +50,22 @@ Legend: ✅ fully implemented · 🟡 implemented with limitations · 🔑 waiti
 | **Public API** | ✅ | `/v1` with API keys (hashed, scopes, 120 req/min), docs at `/v1/docs`. Local `/api` unchanged. |
 | **MCP server** | ✅ | `backend/mcp_server.py` (12 tools) over the public API. |
 | **Team / Invite members** | ✅ | Optional team mode: owner, invites (links), admin/editor/viewer roles, sign-in; `start.ps1 -Lan` for network access (only with team mode). |
-| **ASIN import** | 🟡 | Official **Amazon SP-API** connector with *your* seller credentials (not live-tested: needs your account) + free **paste-a-listing** import. No scraping. |
+| **ASIN / Walmart ID / URL import** | 🟡 | See row 3b. Walmart verified live; Amazon may serve a CAPTCHA. |
 | **Talking UGC (avatar) video** | 🟡 | **Voiceover video**: AI script + offline Windows voice + captions, no on-screen person (an avatar needs paid/GPU models). |
 | **360° rotating video** | 🟡 | **360° spin from your angle photos** (real photos, FFmpeg). Not generated from a single image. |
 | Reading reviews / top-5% of category automatically, "trained on 100K listings" | ❌ | Requires scraping + proprietary data. Paste reviews/competitor notes instead. |
 | Plans, credits, billing | ❌ (by design) | Everything is free/local. |
+| **Nano Banana / GPT models** (Pixii: "15+ models incl. Nano Banana and GPT") | ✅ opt-in | Paid providers `nano_banana` (Gemini image) and `openai` (GPT text + gpt-image-1, image edits). Locked behind Settings → "Allow paid providers" (off by default), your own key, and explicit selection per generation — never in the automatic free fallback chain. Not live-tested (needs a paid key). |
+| **Share link** | ✅ | Share button on listing / A+ / video / project pages → no-login, read-only gallery at `/share/<token>`; revocable. |
+| **Export to Figma / Illustrator / Canva** | ✅ | Editor → Export → SVG layers (vector shapes and real text stay editable; images embedded). No PSD. |
+| **A+ desktop → mobile** | ✅ | A+ page → "Make mobile version": rebuilds modules at mobile sizes and carries over your edited text, colors and images by layer name. |
+| **Keep prompting** | ✅ | Image studio → prompt box under results adds 2 more visuals to the same session. |
+| **Session page tools** (Pixii `/campaign`, audited with REA 2026-11-16) | ✅ | Listing → Image set: grid/list layout, Select / Select all, bulk Download ZIP, Remove, Download all, **Add more visuals** (type + prompt, appended to the set); header shortcuts **Add A+ Content** and **Scale** next to Share. |
+| **Product catalog bulk actions** | ✅ | Products: select all / per-item checkboxes → Write listings (bulk copy), Open Factory, Delete. |
+| **Settings → Notifications** | ✅ | Mute finished-work / partial-result notices (errors always shown); optional Windows desktop pop-ups from the browser. |
+| **Resources → Tutorials** | ✅ | Guides page (`/resources`): 10 searchable step-by-step walkthroughs with deep links. Written guides, not videos. |
+| **MCP tools** (Pixii lists 18) | ✅ | 22 tools: adds import_product, create_listing_visuals, add_visuals, download_listing_visuals, list_recent_work, rename_recent_work, share_link, create_aplus, convert_a_plus_desktop_to_mobile, get_usage (each backed by a `/v1` endpoint). |
+| Billing / plans / credits | ❌ (by design) | Local app; nothing is billed (paid models bill your own provider account). |
 
 ## Infrastructure
 

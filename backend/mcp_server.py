@@ -21,7 +21,7 @@ KEY = os.environ.get("SHELFCRAFT_API_KEY", "")
 server = MCPServer(
     name="shelfcraft",
     instructions=("Tools for a local e-commerce creative studio: browse products/brands, create listings (AI copy), "
-                  "translate and grade listings, and generate product images. Generation is asynchronous — use wait_for_job. "
+                  "import products by ASIN / Walmart ID / URL, build listing image sets, A+ content, share links, translate and grade listings, and generate product images. Generation is asynchronous — use wait_for_job. "
                   "All AI runs on free or local models."),
 )
 
@@ -123,6 +123,76 @@ def wait_for_job(job_id: str, timeout_s: int = 300) -> dict[str, Any]:
 def get_asset(asset_id: str) -> dict[str, Any]:
     a = _call("GET", f"/assets/{asset_id}")
     return {k: a.get(k) for k in ("id", "title", "kind", "width", "height", "provider", "model", "is_ai_generated", "download_url")}
+
+
+@server.tool(description="Import a product from an Amazon ASIN, a Walmart item ID or any product URL (title, bullets, images, reviews).")
+def import_product(value: str, kind: str = "asin", country: str = "US") -> dict[str, Any]:
+    p = _call("POST", "/products/import", json={"kind": kind, "value": value, "country": country})
+    return {"product_id": p["id"], "name": p["name"], "import": p.get("import"), "images_imported": p.get("images_imported")}
+
+
+@server.tool(description="Generate a listing's full image set (main, lifestyle, infographics…). Returns a job id.")
+def create_listing_visuals(listing_id: str, style: str = "minimal") -> dict[str, Any]:
+    j = _call("POST", f"/listings/{listing_id}/images", params={"style": style})
+    return {"job_id": j["id"]}
+
+
+@server.tool(description="Add more visuals to an existing listing session, steered by a prompt (keep prompting).")
+def add_visuals(listing_id: str, prompt: str = "", creative_type: str = "lifestyle", count: int = 2) -> dict[str, Any]:
+    jobs = _call("POST", f"/listings/{listing_id}/images/more", json={"prompt": prompt, "creative_type": creative_type, "count": count})
+    return {"job_ids": [j["id"] for j in jobs]}
+
+
+@server.tool(description="Download every visual of a listing as a ZIP into your Downloads folder; returns the file path.")
+def download_listing_visuals(listing_id: str) -> dict[str, Any]:
+    from pathlib import Path
+
+    with _client() as c:
+        r = c.get(f"/listings/{listing_id}/visuals.zip")
+    if r.status_code >= 400:
+        raise RuntimeError(f"Shelfcraft API error {r.status_code}: {r.text[:200]}")
+    out = Path.home() / "Downloads" / f"shelfcraft-listing-{listing_id}.zip"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(r.content)
+    return {"path": str(out), "bytes": len(r.content)}
+
+
+@server.tool(description="List recent work (creative sessions).")
+def list_recent_work(limit: int = 20) -> list[dict[str, Any]]:
+    return _call("GET", "/recent-work", params={"limit": limit})
+
+
+@server.tool(description="Rename a listing, A+ layout or design project.")
+def rename_recent_work(project_id: str, name: str) -> dict[str, Any]:
+    p = _call("PATCH", f"/projects/{project_id}", json={"name": name})
+    return {"id": p.get("id"), "name": p.get("name")}
+
+
+@server.tool(description="Create a no-login, view-only share link for a listing / A+ / design project.")
+def share_link(project_id: str) -> dict[str, Any]:
+    s = _call("POST", f"/projects/{project_id}/share")
+    base = API.removesuffix("/v1").replace(":8000", ":3000")
+    return {"url": base + s["url"] if s.get("url") else None}
+
+
+@server.tool(description="Create an A+ content layout for a product (tier: basic | premium | mobile).")
+def create_aplus(name: str, product_id: str | None = None, tier: str = "premium", modules: list[str] | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {"name": name, "product_id": product_id, "tier": tier}
+    if modules:
+        body["modules"] = modules
+    a = _call("POST", "/aplus", json=body)
+    return {"aplus_id": a["id"], "modules": [m["type"] for m in a.get("modules", [])]}
+
+
+@server.tool(description="Make the mobile version of a desktop A+ layout, keeping edited text and images.")
+def convert_a_plus_desktop_to_mobile(aplus_id: str) -> dict[str, Any]:
+    a = _call("POST", f"/aplus/{aplus_id}/convert-mobile")
+    return {"aplus_id": a["id"], "tier": a.get("tier"), "modules": len(a.get("modules", []))}
+
+
+@server.tool(description="AI usage by provider over the last N days.")
+def get_usage(days: int = 30) -> dict[str, Any]:
+    return _call("GET", "/usage", params={"days": days})
 
 
 if __name__ == "__main__":

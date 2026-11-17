@@ -81,6 +81,36 @@ def get_session(session_id: str, db: Session = Depends(get_db)) -> dict[str, Any
     return {"id": s.id, "title": s.title, "params": s.params, "jobs": [job_out(j) for j in jobs], "assets": assets}
 
 
+class MoreIn(BaseModel):
+    prompt: str = Field(min_length=2, max_length=600)
+    count: int = Field(default=2, ge=1, le=4)
+    creative_type: str | None = None
+    provider: str | None = None
+
+
+@router.post("/creative/sessions/{session_id}/more", status_code=202)
+def keep_prompting(session_id: str, body: MoreIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Keep prompting: more visuals in the same session, steered by a new instruction."""
+    from fastapi import HTTPException
+
+    s = get_or_404(db, CreativeSession, session_id)
+    base = dict(s.params or {})
+    if not base.get("creative_type"):
+        raise HTTPException(422, "this session can't be continued (not an image session)")
+    ctype = body.creative_type or base["creative_type"]
+    if ctype not in CREATIVE_TYPES:
+        raise HTTPException(422, f"unknown creative type {ctype}")
+    history = list(base.get("follow_ups") or [])[-9:] + [body.prompt]
+    s.params = {**base, "follow_ups": history}
+    jobs = []
+    for _ in range(body.count):
+        payload = {**base, "creative_type": ctype, "extra_prompt": body.prompt, "seed": None, "session_id": s.id,
+                   "count": 1, "provider": body.provider or base.get("provider")}
+        payload.pop("follow_ups", None)
+        jobs.append(job_out(enqueue(db, "image_generate", payload, session_id=s.id)))
+    return {"session_id": s.id, "jobs": jobs}
+
+
 class EditIn(BaseModel):
     asset_id: str
     operation: str

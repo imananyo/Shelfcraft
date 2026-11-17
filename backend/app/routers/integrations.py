@@ -1,6 +1,7 @@
 """Product import: paste-a-listing (free, offline) and the official Amazon Selling Partner API (your own credentials).
 
-Shelfcraft never scrapes Amazon pages. The SP-API connector uses Amazon's official Catalog Items API with
+Without the connector, ASIN / Walmart imports read the public product page (services/marketplace_scrape.py).
+The SP-API connector uses Amazon's official Catalog Items API with
 credentials from YOUR seller account (check Amazon's current SP-API developer terms; not verified by Shelfcraft). Credentials
 are stored server-side only and never sent to the browser.
 """
@@ -96,7 +97,7 @@ def spapi_status(db: Session = Depends(get_db)) -> dict[str, Any]:
             "has_refresh_token": bool(ex.get("refresh_token")), "last_error": row.last_error, "last_success_at": row.last_success_at,
             "marketplaces": list(MARKETPLACE_IDS),
             "note": "Uses Amazon's official Selling Partner API with your own seller credentials (check Amazon's current developer terms). "
-                    "Shelfcraft never scrapes Amazon pages."}
+                    "Without it, ASIN imports read the public product page instead."}
 
 
 @router.patch("/integrations/amazon")
@@ -190,3 +191,184 @@ def import_asin(body: AsinIn, db: Session = Depends(get_db)) -> dict[str, Any]:
         out = product_out(db, p)
     row.last_success_at, row.last_error = datetime.now(timezone.utc), None
     return {**out, "images_imported": images_added, "source": "Amazon Selling Partner API (Catalog Items)"}
+
+
+# ---------------------------------------------------------------- unified "import from" (ASIN · Walmart ID · URL)
+ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
+WALMART_ID_RE = re.compile(r"^\d{6,14}$")
+AMAZON_URL_ASIN = re.compile(r"(?:/dp/|/gp/product/|/gp/aw/d/|/product/|/ASIN/)([A-Z0-9]{10})(?:[/?#]|$)", re.I)
+WALMART_URL_ID = re.compile(r"/ip/(?:[^/?#]+/)?(\d{6,14})(?:[/?#]|$)", re.I)
+AMAZON_DOMAINS = {"US": "amazon.com", "UK": "amazon.co.uk", "CA": "amazon.ca", "DE": "amazon.de", "FR": "amazon.fr",
+                  "ES": "amazon.es", "IT": "amazon.it", "IN": "amazon.in", "JP": "amazon.co.jp", "AU": "amazon.com.au",
+                  "MX": "amazon.com.mx", "AE": "amazon.ae"}
+
+
+class SourceIn(BaseModel):
+    kind: str = Field(pattern=r"^(asin|walmart|url)$")
+    value: str = Field(min_length=1, max_length=1000)
+    country: str = Field(default="US", max_length=4)
+    brand_id: str | None = None
+
+
+def classify_source(kind: str, value: str) -> tuple[str, str]:
+    """Normalize user input to ("asin", ASIN) | ("walmart", item id) | ("url", url). Marketplace URLs are mapped
+    to their identifier so we never fetch Amazon/Walmart pages."""
+    v = value.strip()
+    if kind == "asin":
+        m = AMAZON_URL_ASIN.search(v)
+        v = (m.group(1) if m else v).upper()
+        if not ASIN_RE.match(v):
+            raise HTTPException(422, "An ASIN is 10 letters/digits, e.g. B08N5WRWNW (or paste an Amazon product link).")
+        return "asin", v
+    if kind == "walmart":
+        m = WALMART_URL_ID.search(v)
+        v = m.group(1) if m else v
+        if not WALMART_ID_RE.match(v):
+            raise HTTPException(422, "A Walmart item ID is 6–14 digits, e.g. 5129928603 (or paste a walmart.com/ip/… link).")
+        return "walmart", v
+    host = (re.sub(r"^https?://", "", v, flags=re.I).split("/")[0]).lower()
+    if "amazon." in host or "amzn." in host:
+        m = AMAZON_URL_ASIN.search(v)
+        if not m:
+            raise HTTPException(422, "Couldn't find an ASIN in that Amazon link — paste the ASIN directly instead.")
+        return "asin", m.group(1).upper()
+    if "walmart." in host:
+        m = WALMART_URL_ID.search(v)
+        if not m:
+            raise HTTPException(422, "Couldn't find an item ID in that Walmart link — paste the item ID directly instead.")
+        return "walmart", m.group(1)
+    return "url", v
+
+
+def _download_image(db: Session, product_id: str, url: str, tag: str) -> bool:
+    from app.db.models import ProductImage
+    from app.services.assets import create_asset_from_bytes, sniff
+    from app.services.web_extract import ExtractError, _check_url
+
+    try:
+        safe = _check_url(url)
+        r = httpx.get(safe, timeout=20, follow_redirects=False)
+        if r.status_code != 200 or len(r.content) > 15_000_000:
+            return False
+        kind, ext, _ = sniff(r.content[:64], "img.jpg")
+        if kind != "image":
+            return False
+        a = create_asset_from_bytes(db, r.content, ext=ext, source="upload", area="uploads", filename=f"import.{ext}",
+                                    product_id=product_id, tags=[tag])
+        db.add(ProductImage(product_id=product_id, asset_id=a.id, role="main", position=0))
+        db.flush()
+        return True
+    except (ExtractError, httpx.HTTPError, ValueError):
+        return False
+
+
+IMAGE_CDN_HOSTS = ("media-amazon.com", "ssl-images-amazon.com", "images-amazon.com", "walmartimages.com")
+
+
+def _import_marketplace_page(db: Session, market: str, ident: str, url: str, brand_id: str | None) -> dict[str, Any]:
+    """Read the public product page; if the marketplace blocks us, still save the product with its ID."""
+    from urllib.parse import urlparse
+
+    from app.db.models import Product, ProductImage
+    from app.services import marketplace_scrape as ms
+    from app.services.assets import create_asset_from_bytes, sniff
+
+    label = "Amazon" if market == "amazon" else "Walmart"
+    id_spec = {} if market == "amazon" else {"Walmart item ID": ident}
+    try:
+        data = (ms.parse_amazon if market == "amazon" else ms.parse_walmart)(ms.fetch_page(url))
+    except ms.ScrapeError as e:
+        out = create_product(ProductIn(name=f"{label} product {ident}", asin=ident if market == "amazon" else None,
+                                       source_url=url, brand_id=brand_id, specifications=id_spec, tags=[market]), db)
+        audit(db, "import_source", "Product", out["id"], kind=market, scraped=False)
+        return {**out, "import": {"kind": "asin" if market == "amazon" else "walmart", "id": ident, "complete": False,
+                                  "note": f"Saved with the {label} ID, but couldn't read the product page: {e}. "
+                                          "Try again in a few minutes, or add details on the product page / Paste listing."}}
+    specs = {**id_spec, **{k: v for k, v in (data.get("specifications") or {}).items() if k and v}}
+    if data.get("brand"):
+        specs.setdefault("Brand", data["brand"][:200])
+    if data.get("rating"):
+        specs["Customer rating"] = f"{data['rating']:g} / 5" + (f" ({data['review_count']} reviews)" if data.get("review_count") else "")
+    out = create_product(ProductIn(
+        name=data["name"][:200], asin=ident if market == "amazon" else None, source_url=url, brand_id=brand_id,
+        category=(data.get("category") or None) and data["category"][:120],
+        description=(data.get("description") or None) and data["description"][:20000],
+        features=[f[:500] for f in (data.get("features") or [])][:10],
+        specifications={k[:60]: str(v)[:200] for k, v in list(specs.items())[:30]},
+        price=data.get("price"), currency=(data.get("currency") or "USD")[:8], tags=[market]), db)
+    p = db.get(Product, out["id"])
+    images = 0
+    for i, img in enumerate(data.get("images") or []):
+        host = (urlparse(img).hostname or "").lower()
+        if not img.startswith("https://") or not any(host == h or host.endswith("." + h) for h in IMAGE_CDN_HOSTS):
+            continue
+        raw = ms.download_image(img)
+        if not raw:
+            continue
+        try:
+            kind, ext, _ = sniff(raw[:64], "img.jpg")
+            if kind != "image":
+                continue
+            a = create_asset_from_bytes(db, raw, ext=ext, source="upload", area="uploads", filename=f"{ident}-{i}.{ext}",
+                                        product_id=p.id, tags=[market])
+        except ValueError:
+            continue
+        db.add(ProductImage(product_id=p.id, asset_id=a.id, role="main" if images == 0 else "reference", position=images))
+        images += 1
+    db.flush()
+    db.refresh(p)
+    out = product_out(db, p)
+    research_job = None
+    if data.get("reviews"):  # "reads your reviews": queue Deep Strategy on the scraped reviews
+        from app.jobs.queue import enqueue
+
+        research_job = enqueue(db, "product_research", {"product_id": p.id, "reviews": ms.reviews_text(data["reviews"]),
+                                                        "competitors": "", "notes": f"Reviews read from the {label} product page.",
+                                                        "provider": None}).id
+    audit(db, "import_source", "Product", out["id"], kind=market, scraped=True, images=images)
+    got = [x for x, ok in (("title", True), ("bullets", bool(data.get("features"))), ("description", bool(data.get("description"))),
+                           ("price", data.get("price") is not None), ("specs", bool(data.get("specifications"))),
+                           (f"{images} image(s)", images > 0),
+                           (f"{len(data.get('reviews') or [])} reviews (Deep Strategy is analysing them)", bool(data.get("reviews")))) if ok]
+    return {**out, "images_imported": images, "reviews_imported": len(data.get("reviews") or []), "research_job_id": research_job,
+            "import": {"kind": "asin" if market == "amazon" else "walmart", "id": ident, "complete": True,
+                       "note": f"Imported from the {label} product page: {', '.join(got)}. Review before generating."}}
+
+
+@router.post("/products/import-source", status_code=201)
+def import_source(body: SourceIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.db.models import Product
+    from app.services.web_extract import extract_product_from_url
+
+    kind, ident = classify_source(body.kind, body.value)
+    country = body.country if body.country in MARKETPLACE_IDS else "US"
+
+    if kind == "asin":
+        row = _cfg(db)
+        if row.enabled:
+            out = import_asin(AsinIn(asin=ident, country=country, brand_id=body.brand_id), db)
+            return {**out, "import": {"kind": "asin", "id": ident, "complete": True,
+                                      "note": "Imported title, bullets, description and images via Amazon's Selling Partner API."}}
+        url = f"https://www.{AMAZON_DOMAINS.get(country, 'amazon.com')}/dp/{ident}"
+        return _import_marketplace_page(db, "amazon", ident, url, body.brand_id)
+
+    if kind == "walmart":
+        return _import_marketplace_page(db, "walmart", ident, f"https://www.walmart.com/ip/{ident}", body.brand_id)
+
+    res = extract_product_from_url(ident)
+    if not res.get("ok"):
+        raise HTTPException(422, res.get("error") or "couldn't read that page")
+    s = res["suggestions"]
+    out = create_product(ProductIn(name=(s.get("name") or "Imported product")[:200], description=s.get("description"),
+                                   source_url=(s.get("source_url") or ident)[:1000], price=s.get("price"),
+                                   currency=(s.get("currency") or "USD")[:8], brand_id=body.brand_id,
+                                   category=(s.get("category") or None) and s["category"][:120],
+                                   specifications={"Brand": s["brand"][:200]} if s.get("brand") else {}), db)
+    got_image = bool(s.get("image_url")) and _download_image(db, out["id"], s["image_url"], "url-import")
+    if got_image:
+        p = db.get(Product, out["id"])
+        db.refresh(p)
+        out = product_out(db, p)
+    audit(db, "import_source", "Product", out["id"], kind="url")
+    return {**out, "import": {"kind": "url", "id": res["source"], "complete": True, "image_imported": got_image,
+                              "note": "Filled from the page's public metadata. Review the details before generating."}}

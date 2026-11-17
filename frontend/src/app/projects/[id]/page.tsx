@@ -4,6 +4,7 @@ import { Download, PenLine, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import * as React from "react";
+import { ShareButton } from "@/components/share-button";
 import { toast } from "sonner";
 import { ImageThumb } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ export default function ProjectPage() {
     <>
       <PageHeader eyebrow={<Link href="/projects" className="hover:text-foreground">Designs</Link>} title={p?.name ?? "…"} description={p ? `${p.documents.length} design(s) · updated ${timeAgo(p.updated_at)}` : undefined}
         actions={<>
+          <ShareButton projectId={id} />
           <Button variant="outline" disabled={!p?.documents.length} onClick={() => download(`/projects/${id}/export.zip`, { method: "POST" }).catch((e) => toast.error(e.message))}><Download />Export all (ZIP)</Button>
           <Button onClick={() => setNewOpen(true)}><Plus />Add design</Button>
         </>} />

@@ -50,7 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const fullBleed = FULL_BLEED.some((p) => pathname.startsWith(p));
-  if (pathname.startsWith("/join")) return <>{children}</>;
+  if (pathname.startsWith("/join") || pathname.startsWith("/share/")) return <>{children}</>;
   return (
     <AuthGate>
     <div className="flex h-full">
@@ -236,6 +236,21 @@ function Notifications() {
   const q = useApi<{ unread: number; items: { id: string; level: string; title: string; body?: string; link?: string; read: boolean; created_at: string }[] }>(
     ["notifications"], "/notifications", { refetchInterval: 6000 });
   const unread = q.data?.unread ?? 0;
+  const seen = React.useRef<Set<string> | null>(null);
+  React.useEffect(() => { // desktop pop-ups for new notifications (opt-in in Settings → Notifications)
+    const items = q.data?.items ?? [];
+    if (seen.current === null) { seen.current = new Set(items.map((n) => n.id)); return; }
+    let on = false;
+    try { on = localStorage.getItem("shelfcraft-desktop-notify") === "1"; } catch { /* ignore */ }
+    for (const n of items) {
+      if (seen.current.has(n.id)) continue;
+      seen.current.add(n.id);
+      if (on && !n.read && "Notification" in window && Notification.permission === "granted") {
+        const pop = new Notification(n.title, { body: n.body ?? undefined, tag: n.id });
+        if (n.link) pop.onclick = () => { window.focus(); window.location.href = n.link!; };
+      }
+    }
+  }, [q.data]);
   return (
     <Popover trigger={
       <button className="relative flex size-8 items-center justify-center rounded-[8px] text-muted hover:bg-sunken hover:text-foreground" aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}>

@@ -7,6 +7,7 @@ import { Clapperboard, Download, GripVertical, Mic, Music, Pause, Play, Plus, Sp
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
+import { ShareButton } from "@/components/share-button";
 import { toast } from "sonner";
 import { AssetPicker, JobCard } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -172,6 +173,7 @@ export default function VideoPage() {
       <PageHeader eyebrow={<Link href="/videos" className="hover:text-foreground">Video creator</Link>} title={v.name}
         description={<span className="flex flex-wrap items-center gap-2"><Badge>{v.aspect}</Badge>{scenes.length} scenes · ≈{total.toFixed(1)}s<Badge tone="neutral">{v.label}</Badge></span>}
         actions={<>
+          <ShareButton projectId={id} />
           {v.last_render && <Button variant="outline" onClick={() => download(`/assets/${v.last_render!.asset_id}/file?download=true`)}><Download />Download MP4</Button>}
           <Button size="lg" onClick={render} disabled={!scenes.length || !!jobId}><Clapperboard />Render MP4</Button>
           <Button variant="ghost" size="icon" aria-label="Delete video" onClick={() => setConfirm(true)}><Trash2 /></Button>

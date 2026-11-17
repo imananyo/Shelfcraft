@@ -16,7 +16,7 @@ import { ApiTab, IntegrationsTab, TeamTab } from "./settings-extra";
 
 const STATE: Record<ProviderStatus["state"], { tone: "success" | "neutral" | "warning" | "danger"; label: string }> = {
   available: { tone: "success", label: "Available" }, disabled: { tone: "neutral", label: "Disabled" }, not_configured: { tone: "warning", label: "Not configured" },
-  rate_limited: { tone: "warning", label: "Rate-limited" }, unavailable: { tone: "danger", label: "Unavailable" }, ineligible: { tone: "danger", label: "Not free — blocked" },
+  rate_limited: { tone: "warning", label: "Rate-limited" }, unavailable: { tone: "danger", label: "Unavailable" }, ineligible: { tone: "danger", label: "Not free — blocked" }, paid_locked: { tone: "warning", label: "Paid — locked" },
 };
 
 function SettingsInner() {
@@ -25,9 +25,10 @@ function SettingsInner() {
   return (
     <>
       <PageHeader title="Settings" description="Everything runs locally. Hosted AI providers are optional, free-tier only, and never billed." />
-      <Tabs value={tab} onValueChange={setTab} tabs={[{ value: "providers", label: "AI providers" }, { value: "defaults", label: "Generation defaults" }, { value: "usage", label: "Usage" }, { value: "team", label: "Team" }, { value: "api", label: "API & MCP" }, { value: "integrations", label: "Integrations" }, { value: "data", label: "Storage & data" }, { value: "prefs", label: "Preferences" }]}>
+      <Tabs value={tab} onValueChange={setTab} tabs={[{ value: "providers", label: "AI providers" }, { value: "defaults", label: "Generation defaults" }, { value: "usage", label: "Usage" }, { value: "notifications", label: "Notifications" }, { value: "team", label: "Team" }, { value: "api", label: "API & MCP" }, { value: "integrations", label: "Integrations" }, { value: "data", label: "Storage & data" }, { value: "prefs", label: "Preferences" }]}>
         <TabPanel value="providers"><Providers /></TabPanel>
         <TabPanel value="defaults"><Defaults /></TabPanel>
+        <TabPanel value="notifications"><NotificationPrefs /></TabPanel>
         <TabPanel value="usage"><Usage /></TabPanel>
         <TabPanel value="team"><TeamTab /></TabPanel>
         <TabPanel value="api"><ApiTab /></TabPanel>
@@ -50,7 +51,12 @@ function Providers() {
     try { await patch(`/providers/${p.name}`, { enabled: on }); refresh(); toast.success(`${p.label} ${on ? "enabled" : "disabled"}`); } catch (e) { toast.error((e as Error).message); }
   };
   if (q.isLoading) return <Skeleton className="h-96" />;
-  const local = q.data?.filter((p) => p.local) ?? [], hosted = q.data?.filter((p) => !p.local) ?? [];
+  const local = q.data?.filter((p) => p.local) ?? [], hosted = q.data?.filter((p) => !p.local && !p.paid) ?? [], paid = q.data?.filter((p) => p.paid) ?? [];
+  const gd = (s.data?.generation_defaults ?? {}) as Record<string, unknown>;
+  const allowPaid = !!gd.allow_paid_providers;
+  const setAllowPaid = async (on: boolean) => {
+    try { await patch("/settings", { generation_defaults: { ...gd, allow_paid_providers: on } }); qc.invalidateQueries({ queryKey: ["settings"] }); refresh(); toast.success(on ? "Paid providers unlocked" : "Paid providers locked"); } catch (e) { toast.error((e as Error).message); }
+  };
   return (
     <div className="flex flex-col gap-6">
       <Notice icon={<ShieldAlert />}>
@@ -60,6 +66,14 @@ function Providers() {
         <div className="grid gap-4 lg:grid-cols-2">{local.map((p) => <ProviderCard key={p.name} p={p} onToggle={(on) => enable(p, on)} onChange={refresh} />)}</div></section>
       <section><h2 className="mb-3 flex items-center gap-2 text-[15px] font-semibold"><Cloud className="size-4" />Hosted free tiers (optional)</h2>
         <div className="grid gap-4 lg:grid-cols-2">{hosted.map((p) => <ProviderCard key={p.name} p={p} onToggle={(on) => enable(p, on)} onChange={refresh} />)}</div></section>
+      <section>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold"><KeyRound className="size-4" />Premium models — paid, your own key (optional)</h2>
+          <Switch checked={allowPaid} onChange={setAllowPaid} label="Allow paid providers" />
+        </div>
+        <Notice tone="warning" className="mb-3 text-[12.5px]">The same model families Pixii advertises (Google <b>Nano Banana</b> image models and OpenAI <b>GPT</b> / <b>GPT Image</b>). Each call is <b>billed to your account</b>. They are never used automatically: they run only when this switch is on, the provider is enabled with your key, and you pick it in a generator&apos;s AI selector. Your free providers stay the default.</Notice>
+        <div className="grid gap-4 lg:grid-cols-2">{paid.map((p) => <ProviderCard key={p.name} p={p} onToggle={(on) => enable(p, on)} onChange={refresh} />)}</div>
+      </section>
       <Dialog open={!!privacyFor} onOpenChange={(o) => !o && setPrivacyFor(null)} title="Before you enable a hosted provider"
         description="Free tiers often allow the provider to log or use prompts to improve their models."
         footer={<><Button variant="ghost" onClick={() => setPrivacyFor(null)}>Cancel</Button><Button onClick={async () => {
@@ -94,7 +108,7 @@ function ProviderCard({ p, onToggle, onChange }: { p: ProviderStatus; onToggle: 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2"><h3 className="text-[14.5px] font-semibold">{p.label}</h3><Badge tone={st.tone}>{st.label}</Badge>{p.kinds.map((k) => <Badge key={k}>{k}</Badge>)}{p.vision && <Badge>vision</Badge>}</div>
-          <div className="mt-1 text-xs text-muted">Free terms checked {p.verified_on} · <a href={p.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">source<ExternalLink className="size-3" /></a></div>
+          <div className="mt-1 text-xs text-muted">{p.paid ? "Pricing page" : "Free terms checked"} {p.paid ? "" : p.verified_on} · <a href={p.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">source<ExternalLink className="size-3" /></a></div>
         </div>
         <Switch checked={p.enabled} disabled={p.state === "ineligible"} onChange={onToggle} label={`Enable ${p.label}`} />
       </div>
@@ -144,6 +158,45 @@ function ProviderCard({ p, onToggle, onChange }: { p: ProviderStatus; onToggle: 
   );
 }
 
+function PrefRow({ title, body, checked, onChange }: { title: string; body: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-start justify-between gap-4 border-b border-border py-3 last:border-0">
+      <span><span className="block text-[13.5px] font-medium">{title}</span><span className="block text-[12.5px] text-muted">{body}</span></span>
+      <Switch checked={checked} onChange={onChange} label={title} />
+    </label>
+  );
+}
+
+function NotificationPrefs() {
+  const s = useSettings();
+  const qc = useQueryClient();
+  const [desktop, setDesktop] = React.useState(false);
+  React.useEffect(() => { try { setDesktop(localStorage.getItem("shelfcraft-desktop-notify") === "1" && "Notification" in window && Notification.permission === "granted"); } catch { /* storage unavailable */ } }, []);
+  if (!s.data) return <Skeleton className="h-48" />;
+  const gd = s.data.generation_defaults as Record<string, unknown>;
+  const n = (gd.notify ?? {}) as { success?: boolean; warning?: boolean };
+  const save = async (next: { success?: boolean; warning?: boolean }) => {
+    try { await patch("/settings", { generation_defaults: { ...gd, notify: { ...n, ...next } } }); qc.invalidateQueries({ queryKey: ["settings"] }); toast.success("Saved"); } catch (e) { toast.error((e as Error).message); }
+  };
+  const toggleDesktop = async (on: boolean) => {
+    if (on) {
+      if (!("Notification" in window)) return toast.error("This browser doesn't support desktop notifications.");
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") return toast.error("Notifications are blocked for this site in your browser settings.");
+    }
+    try { localStorage.setItem("shelfcraft-desktop-notify", on ? "1" : "0"); } catch { /* ignore */ }
+    setDesktop(on);
+  };
+  return (
+    <Card className="max-w-2xl p-5">
+      <PrefRow title="Finished work" body="When listings, image sets, videos and Factory batches are ready." checked={n.success !== false} onChange={(v) => save({ success: v })} />
+      <PrefRow title="Partial results" body="When a run finishes with some items failed." checked={n.warning !== false} onChange={(v) => save({ warning: v })} />
+      <PrefRow title="Desktop notifications" body="Also pop up a Windows notification from this browser (works while the Shelfcraft tab is open)." checked={desktop} onChange={toggleDesktop} />
+      <p className="pt-3 text-[12px] text-muted">Errors are always shown in the bell menu.</p>
+    </Card>
+  );
+}
+
 function Defaults() {
   const s = useSettings();
   const providers = useProviders();
@@ -152,8 +205,8 @@ function Defaults() {
   if (!s.data || !providers.data) return <Skeleton className="h-64" />;
   const order = s.data.fallback_order;
   const move = (i: number, d: number) => { const n = [...order]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); save({ fallback_order: n }); };
-  const text = providers.data.filter((p) => p.kinds.includes("text") && p.state !== "ineligible");
-  const image = providers.data.filter((p) => p.kinds.includes("image") && p.state !== "ineligible");
+  const text = providers.data.filter((p) => p.kinds.includes("text") && p.state !== "ineligible" && !p.paid);
+  const image = providers.data.filter((p) => p.kinds.includes("image") && p.state !== "ineligible" && !p.paid);
   const gd = s.data.generation_defaults as Record<string, string | number>;
   return (
     <div className="grid gap-6 lg:grid-cols-2">

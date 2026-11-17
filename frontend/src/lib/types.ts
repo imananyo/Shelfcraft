@@ -38,9 +38,9 @@ export interface Job {
 
 export interface ProviderStatus {
   name: string; label: string; kinds: string[]; local: boolean; free_tier_verified: boolean; verified_on: string;
-  source_url: string; limits_note: string; privacy_note: string; license_note: string; requires_key: boolean; vision: boolean;
+  source_url: string; limits_note: string; privacy_note: string; license_note: string; requires_key: boolean; vision: boolean; paid?: boolean;
   enabled: boolean; has_key: boolean; key_source?: string | null; extra: Record<string, string>; configured: boolean;
-  state: "available" | "disabled" | "not_configured" | "rate_limited" | "unavailable" | "ineligible";
+  state: "available" | "disabled" | "not_configured" | "rate_limited" | "unavailable" | "ineligible" | "paid_locked";
   text_model?: string | null; image_model?: string | null; default_text_model?: string | null; default_image_model?: string | null;
   last_success_at?: string | null; last_failure_at?: string | null; last_error?: string | null;
   rate_limited_until?: string | null; circuit_open_until?: string | null;

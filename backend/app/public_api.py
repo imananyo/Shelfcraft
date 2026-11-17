@@ -195,6 +195,102 @@ def asset_file(asset_id: str, db: Session = Depends(get_db)) -> FileResponse:
     return _file(asset_id, True, db)
 
 
+# ---------------------------------------------------------------- Pixii-parity additions (import, sessions, share, A+)
+class ImportCreate(BaseModel):
+    kind: str = Field(pattern="^(asin|walmart|url)$")
+    value: str = Field(min_length=1, max_length=1000)
+    country: str = "US"
+    brand_id: str | None = None
+
+
+@router.post("/products/import", tags=["Catalog"], status_code=201, summary="Import a product by Amazon ASIN, Walmart item ID or product URL")
+def import_product(body: ImportCreate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.integrations import SourceIn, import_source
+
+    return import_source(SourceIn(**body.model_dump()), db)
+
+
+class MoreVisuals(BaseModel):
+    prompt: str = ""
+    creative_type: str = "lifestyle"
+    count: int = Field(default=2, ge=1, le=4)
+
+
+@router.post("/listings/{listing_id}/images", tags=["Listings"], status_code=202, summary="Generate the listing's full image set (async)")
+def listing_image_set(listing_id: str, style: str = "minimal", db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.listings import ImagesIn, generate_images
+
+    return generate_images(listing_id, ImagesIn(style=style), db)
+
+
+@router.post("/listings/{listing_id}/images/more", tags=["Listings"], status_code=202, summary="Add more visuals to a listing session (async)")
+def listing_more_visuals(listing_id: str, body: MoreVisuals, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    from app.routers.listings import MoreImagesIn, more_images
+
+    return more_images(listing_id, MoreImagesIn(**body.model_dump()), db)
+
+
+@router.get("/listings/{listing_id}/visuals.zip", tags=["Listings"], summary="Download every visual of a listing as one ZIP")
+def listing_visuals_zip(listing_id: str, db: Session = Depends(get_db)) -> Any:
+    from app.routers.assets import ZipRequest, zip_assets
+    from app.routers.listings import get_listing as _get
+
+    L = _get(listing_id, db)
+    ids = [i["asset_id"] for i in L.get("images") or []]
+    if not ids:
+        raise HTTPException(422, "this listing has no visuals yet")
+    return zip_assets(ZipRequest(asset_ids=ids, name=L.get("name") or "listing"), db)
+
+
+@router.get("/recent-work", tags=["Sessions"], summary="Recent work (sessions)")
+def recent_work(limit: int = 30, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    from app.routers.system import sessions
+
+    return sessions(db, min(max(limit, 1), 100))
+
+
+@router.patch("/projects/{project_id}", tags=["Sessions"], summary="Rename a project / listing / A+ layout")
+def rename_project(project_id: str, body: dict[str, Any], db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.editor import patch_project
+
+    return patch_project(project_id, {"name": body.get("name", "")}, db)
+
+
+@router.post("/projects/{project_id}/share", tags=["Sessions"], summary="Create (or get) a no-login share link")
+def share_project(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.share import share_create
+
+    return share_create(project_id, db)
+
+
+class AplusCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    product_id: str | None = None
+    tier: str = Field(default="premium", pattern="^(basic|premium|mobile)$")
+    modules: list[str] = Field(default_factory=lambda: ["hero_banner", "feature_row", "brand_story"], max_length=7)
+
+
+@router.post("/aplus", tags=["A+"], status_code=201, summary="Create an A+ content layout")
+def create_aplus(body: AplusCreate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.aplus import AplusIn, create_aplus as _create
+
+    return _create(AplusIn(**body.model_dump()), db)
+
+
+@router.post("/aplus/{project_id}/convert-mobile", tags=["A+"], status_code=201, summary="Make the mobile version of a desktop A+ layout")
+def aplus_to_mobile(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.aplus import convert_to_mobile
+
+    return convert_to_mobile(project_id, db)
+
+
+@router.get("/usage", tags=["Account"], summary="AI usage by provider (last N days)")
+def usage(days: int = 30, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.routers.providers import get_usage
+
+    return get_usage(days, db)
+
+
 def build_public_app() -> FastAPI:
     sub = FastAPI(title="Shelfcraft Public API", version="1.0.0",
                   description="Programmatic access to your local Shelfcraft workspace. Authenticate with `Authorization: Bearer sk_shelf_…` "

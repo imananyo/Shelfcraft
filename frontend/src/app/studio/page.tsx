@@ -48,6 +48,8 @@ function Studio() {
   const [harmonize, setHarmonize] = React.useState(false);
   const [sessionId, setSessionId] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [more, setMore] = React.useState("");
+  const [moreBusy, setMoreBusy] = React.useState(false);
   React.useEffect(() => { if (brand && !brandId) setBrandId(brand.id); }, [brand, brandId]);
 
   const product = useApi<Product>(["product", productId], productId ? `/products/${productId}` : null);
@@ -134,6 +136,16 @@ function Studio() {
                 {session.data.assets.map((a) => <AssetResult key={a.id} asset={a} />)}
                 {!allDone && Array.from({ length: Math.max(0, session.data.jobs.filter((j) => j.status !== "succeeded" && j.status !== "failed").length) }).map((_, i) => <Skeleton key={i} className="aspect-[4/5]" />)}
               </div>
+              <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={async (e) => {
+                e.preventDefault();
+                if (more.trim().length < 2) return;
+                setMoreBusy(true);
+                try { await post(`/creative/sessions/${sessionId}/more`, { prompt: more.trim(), count: 2, provider: provider || null }); setMore(""); session.refetch(); }
+                catch (er) { toast.error((er as Error).message); } finally { setMoreBusy(false); }
+              }}>
+                <Input value={more} onChange={(e) => setMore(e.target.value)} placeholder="Keep prompting — e.g. same product on a kitchen counter, warmer light" className="flex-1" aria-label="Keep prompting" />
+                <Button type="submit" variant="ai" loading={moreBusy} disabled={more.trim().length < 2}><Sparkles />Generate 2 more</Button>
+              </form>
             </section>
           )}
           <section>

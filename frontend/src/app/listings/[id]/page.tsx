@@ -1,9 +1,10 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, Gauge, History, Images, Info, Languages, RefreshCw, Save, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { Copy, Download, Gauge, History, Images, Info, Languages, Layers, LayoutTemplate, RefreshCw, Save, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
+import { ShareButton } from "@/components/share-button";
 import { toast } from "sonner";
 import { AssetResult, JobCard } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -113,6 +114,9 @@ function ListingInner() {
         description={<span className="flex flex-wrap items-center gap-2"><Badge className="capitalize">{L.marketplace}</Badge>{L.options.country} · {L.options.language}
           {L.provenance?.provider && <ProviderBadge provider={L.provenance.provider} model={L.provenance.model} ai />}{L.provenance?.edited_by_user && <Badge>Edited by you</Badge>}</span>}
         actions={<>
+          <ShareButton projectId={id} />
+          <Link href={`/aplus/new?product=${L.product_id ?? ""}`}><Button variant="outline" disabled={!L.product_id}><LayoutTemplate />Add A+ Content</Button></Link>
+          <Link href="/scale"><Button variant="outline"><Layers />Scale</Button></Link>
           <Button variant="outline" onClick={copyAll}><Copy />Copy</Button>
           <Menu trigger={<Button variant="outline"><Download />Export</Button>}>
             {(["txt", "csv", "json"] as const).map((f) => <MenuItem key={f} onSelect={() => download(`/listings/${id}/export?format=${f}`)}>{f.toUpperCase()}</MenuItem>)}
@@ -248,6 +252,17 @@ function Versions({ id, count, onRestore }: { id: string; count: number; onResto
 }
 
 function ImageSet({ listing, style, setStyle, onGenerate, jobId, onDone }: { listing: Listing; style: string; setStyle: (s: string) => void; onGenerate: () => void; jobId: string | null; onDone: () => void }) {
+  const [moreJobs, setMoreJobs] = React.useState<string[]>([]);
+  const [prompt, setPrompt] = React.useState("");
+  const [ctype, setCtype] = React.useState("lifestyle");
+  const [busy, setBusy] = React.useState(false);
+  const addMore = async () => {
+    setBusy(true);
+    try {
+      const jobs = await post<Job[]>(`/listings/${listing.id}/images/more`, { prompt, creative_type: ctype, count: 2, style });
+      setMoreJobs((j) => [...j, ...jobs.map((x) => x.id)]); setPrompt(""); toast.success("Adding 2 more visuals to this set");
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
   return (
     <div className="flex flex-col gap-5">
       <Card className="flex flex-wrap items-end gap-3 p-4">
@@ -256,15 +271,32 @@ function ImageSet({ listing, style, setStyle, onGenerate, jobId, onDone }: { lis
         <Button variant="ai" onClick={onGenerate} disabled={!!jobId}><Images />{listing.images.length ? "Regenerate image set" : "Generate image set"}</Button>
       </Card>
       {jobId && <JobCard jobId={jobId} title="Building image set" onDone={onDone} />}
+      {moreJobs.map((j) => <JobCard key={j} jobId={j} compact title="Adding a visual" onDone={() => { setMoreJobs((x) => x.filter((y) => y !== j)); onDone(); }} />)}
       {listing.image_errors.length > 0 && <Notice tone="warning">Some images couldn&apos;t be created: {listing.image_errors.join("; ")}</Notice>}
       {listing.images.length === 0 && !jobId ? <EmptyState icon={<Images />} title="No images yet" body="Generate the set above. The copy's image strategy is used for headlines and callouts." />
-        : <ListingImages ids={listing.images} />}
+        : <ListingImages listingId={listing.id} name={listing.name} ids={listing.images} onChange={onDone} />}
+      {listing.images.length > 0 && (
+        <Card className="flex flex-col gap-3 p-4">
+          <div className="text-[14px] font-semibold">Add more visuals</div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Select value={ctype} onChange={(e) => setCtype(e.target.value)} className="sm:w-48" aria-label="Visual type">
+              {[["lifestyle", "Lifestyle"], ["hero", "Premium hero"], ["studio", "Studio photo"], ["detail", "Detail close-up"], ["feature", "Feature callouts"], ["infographic", "Benefit infographic"], ["comparison", "Comparison chart"], ["dimensions", "Dimensions"], ["steps", "How-to steps"], ["lifestyle_headline", "Lifestyle + headline"], ["white_bg_main", "White-background main"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Select>
+            <Input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Describe what you want — e.g. in a gym bag next to a towel" className="flex-1" />
+            <Button variant="ai" loading={busy} onClick={addMore}><Sparkles />Add 2 visuals</Button>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
 
-function ListingImages({ ids }: { ids: { slot: string; asset_id: string }[] }) {
+function ListingImages({ listingId, name, ids, onChange }: { listingId: string; name: string; ids: { slot: string; asset_id: string }[]; onChange: () => void }) {
   const [assets, setAssets] = React.useState<Record<string, Asset>>({});
+  const [layout, setLayout] = React.useState<"grid" | "list">("grid");
+  const [selecting, setSelecting] = React.useState(false);
+  const [sel, setSel] = React.useState<Set<string>>(new Set());
+  const [confirm, setConfirm] = React.useState(false);
   React.useEffect(() => {
     let alive = true;
     Promise.all(ids.map((i) => get<Asset>(`/assets/${i.asset_id}`).catch(() => null))).then((list) => {
@@ -272,11 +304,39 @@ function ListingImages({ ids }: { ids: { slot: string; asset_id: string }[] }) {
     });
     return () => { alive = false; };
   }, [ids]);
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const chosen = [...sel];
+  const zip = async (list: string[]) => { try { await download("/assets/zip", { method: "POST", json: { asset_ids: list, name } }, `${name}.zip`); } catch (e) { toast.error((e as Error).message); } };
+  const remove = async () => {
+    try { await post(`/listings/${listingId}/images/remove`, { asset_ids: chosen }); setSel(new Set()); setSelecting(false); toast.success(`Removed ${chosen.length} visual(s)`); onChange(); }
+    catch (e) { toast.error((e as Error).message); }
+  };
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-      {ids.map((i) => assets[i.asset_id] ? (
-        <div key={i.asset_id} className="flex flex-col gap-1.5"><Badge tone="primary" className="w-fit">{SLOT_LABEL[i.slot] ?? i.slot}</Badge><AssetResult asset={assets[i.asset_id]} /></div>
-      ) : <Skeleton key={i.asset_id} className="aspect-[3/4]" />)}
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-[10px] border border-border p-0.5" role="group" aria-label="Layout">
+          {(["grid", "list"] as const).map((l) => <button key={l} type="button" onClick={() => setLayout(l)} className={cn("rounded-[8px] px-2.5 py-1 text-[12.5px] capitalize", layout === l ? "bg-sunken font-medium text-foreground" : "text-muted")}>{l}</button>)}
+        </div>
+        <Button size="sm" variant={selecting ? "primary" : "outline"} onClick={() => { setSelecting(!selecting); setSel(new Set()); }}>{selecting ? "Done" : "Select"}</Button>
+        {selecting && <>
+          <Button size="sm" variant="ghost" onClick={() => setSel(new Set(ids.map((i) => i.asset_id)))}>Select all</Button>
+          <Button size="sm" variant="outline" disabled={!chosen.length} onClick={() => zip(chosen)}><Download />Download {chosen.length || ""}</Button>
+          <Button size="sm" variant="outline" disabled={!chosen.length} onClick={() => setConfirm(true)}><Trash2 />Remove {chosen.length || ""}</Button>
+        </>}
+        {!selecting && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => zip(ids.map((i) => i.asset_id))}><Download />Download all</Button>}
+      </div>
+      <div className={layout === "grid" ? "grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4" : "flex flex-col gap-3"}>
+        {ids.map((i) => assets[i.asset_id] ? (
+          <div key={i.asset_id} className={cn("relative flex gap-1.5", layout === "grid" ? "flex-col" : "flex-row items-start [&>div:last-child]:max-w-xs")}>
+            <div className="flex items-center gap-2">
+              {selecting && <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={sel.has(i.asset_id)} onChange={() => toggle(i.asset_id)} aria-label={`Select ${assets[i.asset_id].title}`} />}
+              <Badge tone="primary" className="w-fit">{SLOT_LABEL[i.slot] ?? (i.slot === "extra" ? "Added" : i.slot)}</Badge>
+            </div>
+            <AssetResult asset={assets[i.asset_id]} selected={sel.has(i.asset_id)} onSelect={selecting ? () => toggle(i.asset_id) : undefined} />
+          </div>
+        ) : <Skeleton key={i.asset_id} className="aspect-[3/4]" />)}
+      </div>
+      <Confirm open={confirm} onOpenChange={setConfirm} title={`Remove ${chosen.length} visual(s)?`} body="They're removed from this set and moved to the library's trash." confirmLabel="Remove" destructive onConfirm={remove} />
     </div>
   );
 }

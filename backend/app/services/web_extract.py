@@ -137,5 +137,18 @@ def extract_product_from_url(url: str) -> dict[str, Any]:
             pass
     if currency:
         sugg["currency"] = currency[:8]
+    try:  # richer structured data (schema.org Product) when the store provides it
+        from bs4 import BeautifulSoup
+
+        from app.services.marketplace_scrape import _from_jsonld, _jsonld_product
+
+        ld = _from_jsonld(_jsonld_product(BeautifulSoup(html, "html.parser")))
+    except Exception:  # noqa: BLE001 - structured data is optional
+        ld = {}
+    for k in ("name", "description", "price", "currency", "category", "brand"):
+        if ld.get(k) and not sugg.get(k):
+            sugg[k] = ld[k]
+    if ld.get("images") and not sugg.get("image_url"):
+        sugg["image_url"] = urljoin(final_url, ld["images"][0])
     return {"ok": True, "source": final_url, "suggestions": sugg,
             "note": "Extracted from public page metadata. Review before saving."}

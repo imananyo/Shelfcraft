@@ -180,6 +180,52 @@ def generate_images(project_id: str, body: ImagesIn, db: Session = Depends(get_d
     return job_out(job)
 
 
+class MoreImagesIn(BaseModel):
+    prompt: str = Field(default="", max_length=600)
+    creative_type: str = Field(default="lifestyle", max_length=40)
+    count: int = Field(default=2, ge=1, le=4)
+    style: str = Field(default="minimal", max_length=40)
+    provider: str | None = None
+
+
+@router.post("/listings/{project_id}/images/more", status_code=202)
+def more_images(project_id: str, body: MoreImagesIn, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Add more visuals to the same listing session (Pixii's "Add more visuals")."""
+    from app.services.creative import CREATIVE_TYPES
+
+    p = get_or_404(db, Project, project_id)
+    if body.creative_type not in CREATIVE_TYPES:
+        raise HTTPException(422, f"unknown creative type {body.creative_type}")
+    return [job_out(enqueue(db, "listing_more_images", {"project_id": p.id, **body.model_dump(exclude={"count"})}, project_id=p.id))
+            for _ in range(body.count)]
+
+
+class RemoveImagesIn(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+@router.post("/listings/{project_id}/images/remove")
+def remove_images(project_id: str, body: RemoveImagesIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Remove visuals from the set (the files are moved to the library's trash, not destroyed)."""
+    from app.db.models import Asset
+
+    p = get_or_404(db, Project, project_id)
+    drop = set(body.asset_ids)
+    data = dict(p.data or {})
+    kept = []
+    for item in data.get("images") or []:
+        ids = [a for a in item.get("asset_ids", []) if a not in drop]
+        if ids:
+            kept.append({**item, "asset_ids": ids})
+    data["images"] = kept
+    p.data = data
+    for aid in drop:
+        a = db.get(Asset, aid)
+        if a and a.project_id == p.id:
+            soft_delete(db, a)
+    return listing_out(db, p)
+
+
 @router.post("/listings/{project_id}/restore/{index}")
 def restore_version(project_id: str, index: int, db: Session = Depends(get_db)) -> dict[str, Any]:
     p = get_or_404(db, Project, project_id)

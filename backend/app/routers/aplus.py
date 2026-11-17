@@ -201,6 +201,56 @@ def remove_module(project_id: str, document_id: str, db: Session = Depends(get_d
     return aplus_out(db, p)
 
 
+def _carry_edits(src: dict[str, Any], dst: dict[str, Any]) -> dict[str, Any]:
+    """Copy the user's edits (text, colors, fonts, swapped images) from a desktop module onto the mobile layout,
+    matching layers by name. Geometry stays mobile-native."""
+    by_name = {ly.get("name"): ly for ly in src.get("layers", []) if ly.get("name")}
+    for ly in dst.get("layers", []):
+        old = by_name.get(ly.get("name"))
+        if not old or old.get("type") != ly.get("type"):
+            continue
+        if ly["type"] == "text":
+            for k in ("text", "fill", "fontFamily", "fontStyle", "align"):
+                if k in old:
+                    ly[k] = old[k]
+        elif ly["type"] == "image" and old.get("assetId"):
+            ly["assetId"] = old["assetId"]
+        elif ly["type"] in ("rect", "ellipse"):
+            for k in ("fill", "stroke", "opacity"):
+                if k in old:
+                    ly[k] = old[k]
+        ly["visible"] = old.get("visible", True)
+    if src.get("background") and not str(src["background"]).startswith("{{"):
+        dst["background"] = src["background"]
+    return dst
+
+
+@router.post("/{project_id}/convert-mobile", status_code=201)
+def convert_to_mobile(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Make a Premium-mobile copy of a desktop A+ project, keeping your edited copy and images."""
+    src = get_or_404(db, Project, project_id)
+    if (src.data or {}).get("tier") == "mobile":
+        raise HTTPException(422, "this A+ project is already the mobile version")
+    p = Project(kind="aplus", name=f"{src.name} (mobile)"[:200], product_id=src.product_id, brand_id=src.brand_id,
+                data={"tier": "mobile", "modules": [], "converted_from": src.id})
+    db.add(p)
+    db.flush()
+    mods = []
+    for m in (src.data or {}).get("modules", []):
+        old = db.get(EditorDocument, m["document_id"])
+        if old is None or old.deleted_at or m["type"] not in MODULE_TYPES:
+            continue
+        new = _add_module(db, p, m["type"])
+        d = db.get(EditorDocument, new["document_id"])
+        doc = _carry_edits(document_json(old), document_json(d))
+        from app.services.documents import save_document
+
+        save_document(db, d, doc, base_version=None, revision=False)
+        mods.append(new)
+    p.data = {**p.data, "modules": mods}
+    return aplus_out(db, p)
+
+
 @router.delete("/{project_id}", status_code=204)
 def delete_aplus(project_id: str, db: Session = Depends(get_db)) -> None:
     soft_delete(db, get_or_404(db, Project, project_id))

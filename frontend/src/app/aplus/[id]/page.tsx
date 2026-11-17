@@ -3,10 +3,11 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
-import { Download, Eye, GripVertical, PenLine, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Download, Eye, GripVertical, PenLine, Plus, RefreshCw, Trash2, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import * as React from "react";
+import { ShareButton } from "@/components/share-button";
 import { toast } from "sonner";
 import { ImageThumb } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,9 @@ export default function AplusPage() {
     <>
       <PageHeader eyebrow={<Link href="/aplus" className="hover:text-foreground">A+ content</Link>} title={q.data.name} description={<span className="flex items-center gap-2"><Badge className="capitalize">{q.data.tier}</Badge>{order.length} modules · drag to reorder</span>}
         actions={<>
+          <ShareButton projectId={id} />
           <Button variant="outline" onClick={() => setPreview(`/api/aplus/${id}/preview.png?t=${Date.now()}`)} disabled={!order.length}><Eye />Preview</Button>
+          {q.data.tier !== "mobile" && <Button variant="outline" disabled={!order.length} onClick={async () => { try { const m = await post<{ id: string }>(`/aplus/${id}/convert-mobile`); toast.success("Mobile version created — your edits were carried over"); router.push(`/aplus/${m.id}`); } catch (e) { toast.error((e as Error).message); } }}><Smartphone />Make mobile version</Button>}
           <Button variant="outline" loading={busy} disabled={!order.length} onClick={async () => { setBusy(true); try { await download(`/aplus/${id}/export.zip`, { method: "POST" }); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); } }}><Download />Export ZIP</Button>
           <Menu trigger={<Button disabled={order.length >= 7}><Plus />Add module</Button>}>
             {lib.data && Object.entries(lib.data.modules).map(([k, m]) => <MenuItem key={k} onSelect={async () => { await post(`/aplus/${id}/modules`, { type: k }); refresh(); toast.success(`${m.label} added`); }}>{m.label}</MenuItem>)}

@@ -144,7 +144,8 @@ def test_every_registered_provider_is_free_or_blocked():
     for name, p in PROVIDERS.items():
         assert p.info.verified_on, name
         if not is_free_eligible(p):
-            assert name == "mistral"  # documented: unverified → can never be enabled
+            # mistral: unverified → can never be enabled; paid ones are opt-in and never automatic
+            assert name == "mistral" or p.info.paid, name
 
 
 def test_json_parsing_is_tolerant():

@@ -88,8 +88,8 @@ export function ApiTab() {
   const [created, setCreated] = React.useState<string | null>(null);
   const api = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://127.0.0.1:8000";
   const mcpJson = JSON.stringify({ mcpServers: { shelfcraft: {
-    command: "C:\\Users\\dutta\\Desktop\\shelfcraft\\backend\\.venv\\Scripts\\python.exe",
-    args: ["C:\\Users\\dutta\\Desktop\\shelfcraft\\backend\\mcp_server.py"],
+    command: "C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\.venv\\Scripts\\python.exe",
+    args: ["C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\mcp_server.py"],
     env: { SHELFCRAFT_API_KEY: created ?? "sk_shelf_…", SHELFCRAFT_API_URL: "http://127.0.0.1:8000" } } } }, null, 2);
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -127,7 +127,7 @@ export function ApiTab() {
         <pre className="max-h-72 overflow-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{mcpJson}</pre>
         <Button size="sm" variant="outline" className="w-fit" onClick={() => copy(mcpJson, "MCP config copied")}><Copy />Copy config</Button>
         <div className="font-medium">Claude Code:</div>
-        <pre className="overflow-x-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{`claude mcp add shelfcraft -e SHELFCRAFT_API_KEY=${created ?? "sk_shelf_…"} -- "C:\\Users\\dutta\\Desktop\\shelfcraft\\backend\\.venv\\Scripts\\python.exe" "C:\\Users\\dutta\\Desktop\\shelfcraft\\backend\\mcp_server.py"`}</pre>
+        <pre className="overflow-x-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{`claude mcp add shelfcraft -e SHELFCRAFT_API_KEY=${created ?? "sk_shelf_…"} -- "C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\.venv\\Scripts\\python.exe" "C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\mcp_server.py"`}</pre>
         <p className="text-xs text-muted">Tools: list_brands, list_products, get_product, create_product, create_listing, get_listing, translate_listing, grade_listing, generate_creative, get_job, wait_for_job, get_asset. Shelfcraft must be running.</p>
       </Card>
     </div>
