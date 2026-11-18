@@ -5,12 +5,14 @@ import { toast } from "sonner";
 import { ApiError, get, post } from "./api";
 import type { Brand, Job, ProviderStatus, Settings } from "./types";
 
-export function useApi<T>(key: QueryKey, path: string | null, opts: { refetchInterval?: number | false; enabled?: boolean } = {}) {
+export function useApi<T>(key: QueryKey, path: string | null,
+  opts: { refetchInterval?: number | false | ((data: T | undefined) => number | false); enabled?: boolean } = {}) {
+  const ri = opts.refetchInterval;
   return useQuery<T, ApiError>({
     queryKey: key,
     queryFn: () => get<T>(path!),
     enabled: path !== null && (opts.enabled ?? true),
-    refetchInterval: opts.refetchInterval,
+    refetchInterval: typeof ri === "function" ? (q) => ri(q.state.data) : ri,
   });
 }
 

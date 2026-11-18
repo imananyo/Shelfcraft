@@ -119,6 +119,25 @@ test("playbooks: import a template and see its steps", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Steps \(\d+\)/ })).toBeVisible();
 });
 
+test("playbooks: edit steps, unsaved badge, save, duplicate", async ({ page }) => {
+  await page.goto("/playbooks");
+  await page.getByRole("button", { name: "New playbook" }).first().click();
+  await expect(page).toHaveURL(/\/playbooks\/[a-f0-9]{32}/);
+  await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeDisabled();
+  await page.getByRole("textbox", { name: "Playbook name" }).fill("E2E copy kit");
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  // switching a step's kind gives a clean step of that kind (no stale image type)
+  await page.getByRole("combobox", { name: "Step 1 kind" }).selectOption("listing_copy");
+  await page.getByRole("combobox", { name: "Language" }).selectOption("de");
+  await page.getByRole("button", { name: "Video", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Steps (2)" })).toBeVisible();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
+  await expect(page.getByText("Listing copy · DE")).toBeVisible();
+  await page.getByRole("button", { name: "Duplicate playbook" }).click();
+  await expect(page.getByRole("heading", { name: /E2E copy kit \(copy\)/ })).toBeVisible();
+});
+
 test("api keys: create a key, call the public API, revoke it", async ({ page, request }) => {
   await page.goto("/settings?tab=api");
   await page.getByRole("button", { name: "Create key" }).click();

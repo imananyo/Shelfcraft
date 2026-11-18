@@ -46,7 +46,7 @@ Legend: ✅ fully implemented · 🟡 implemented with limitations · 🔑 waiti
 | **Scale → Translate** (1-click new market) | ✅ | New listing in the target language, including text inside images (re-rendered). |
 | **Scale → Different Product** | ✅ | Apply finished designs to other products (photos, name, features, benefits swapped; layout kept). |
 | **Scale → Steal the Look** | ✅ | Inspire (layout/palette/hierarchy analysis → new original layout). |
-| **Playbooks** + template library + import | ✅ | 5 original templates (main image set, lifestyle trio, social/UGC-style kit, furniture lifestyle, full launch kit); edit steps; run on many products. |
+| **Playbooks** + template library + import | ✅ | 8 original templates (main image set, lifestyle trio, social/UGC-style kit, furniture lifestyle, full launch kit, multi-marketplace copy, EU expansion copy, A+ & brand story). Editor: playbook defaults (style, marketplace, image size), every step option (copy language/country, video length, A+ modules, packaging count), duplicate steps/playbooks, unsaved-changes guard + Ctrl+S, CPU time estimate, product search/select-all, recent runs with live progress. Steps are validated and cleaned server-side. |
 | **Turn any image into editable layers** | ✅ / 🟡 | OCR (RapidOCR) → real text layers, subject cut-out, LaMa-rebuilt background. Fonts are approximated (Inter). |
 | **Listing Grader** | ✅ | Transparent rule-based score + optional AI review; works on pasted listings or your own. |
 | **Public API** | ✅ | `/v1` with API keys (hashed, scopes, 120 req/min), docs at `/v1/docs`. Local `/api` unchanged. |

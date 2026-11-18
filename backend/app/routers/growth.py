@@ -240,8 +240,33 @@ class PlaybookIn(BaseModel):
 
 
 def playbook_out(p: Playbook) -> dict[str, Any]:
-    return {"id": p.id, "name": p.name, "description": p.description, "category": p.category, "steps": p.steps or [],
-            "settings": p.settings or {}, "is_template": p.is_template, "updated_at": p.updated_at}
+    from app.services.playbooks import estimate_minutes
+
+    steps = p.steps or []
+    return {"id": p.id, "name": p.name, "description": p.description, "category": p.category, "steps": steps,
+            "settings": p.settings or {}, "is_template": p.is_template, "updated_at": p.updated_at,
+            "estimate_minutes": estimate_minutes(steps)}
+
+
+def _clean(body: PlaybookIn) -> dict[str, Any]:
+    from app.services.playbooks import validate_settings, validate_steps
+
+    data = body.model_dump()
+    try:
+        data["steps"] = validate_steps(body.steps)
+        data["settings"] = validate_settings(body.settings)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    data["name"] = data["name"].strip() or "Untitled playbook"
+    return data
+
+
+def _copy(db: Session, src: Playbook, name: str) -> Playbook:
+    p = Playbook(name=name[:200], description=src.description, category=src.category, steps=list(src.steps or []),
+                 settings=dict(src.settings or {}))
+    db.add(p)
+    db.flush()
+    return p
 
 
 @router.get("/playbooks")
@@ -250,15 +275,24 @@ def playbooks(templates: bool = False, db: Session = Depends(get_db)) -> list[di
     return [playbook_out(p) for p in db.scalars(stmt.order_by(Playbook.updated_at.desc()))]
 
 
+@router.get("/playbooks/options")
+def playbook_options() -> dict[str, Any]:
+    """Everything the step editor needs to offer only valid choices."""
+    from app.routers.aplus import MODULE_TYPES
+    from app.services.creative import CREATIVE_TYPES
+    from app.services.growth import LANGUAGES
+    from app.services.marketplaces import MARKETPLACES
+    from app.services.playbooks import ASPECTS, DEFAULT_APLUS_MODULES, STEP_MINUTES, STYLES
+
+    return {"creative_types": {k: v["label"] for k, v in CREATIVE_TYPES.items()}, "styles": sorted(STYLES),
+            "marketplaces": {k: v["label"] for k, v in MARKETPLACES.items()}, "languages": LANGUAGES,
+            "aspects": sorted(ASPECTS), "aplus_modules": {k: v["label"] for k, v in MODULE_TYPES.items()},
+            "default_aplus_modules": DEFAULT_APLUS_MODULES, "step_minutes": STEP_MINUTES}
+
+
 @router.post("/playbooks", status_code=201)
 def playbook_create(body: PlaybookIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    from app.services.playbooks import validate_steps
-
-    try:
-        validate_steps(body.steps)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
-    p = Playbook(**body.model_dump())
+    p = Playbook(**_clean(body))
     db.add(p)
     db.flush()
     return playbook_out(p)
@@ -266,11 +300,9 @@ def playbook_create(body: PlaybookIn, db: Session = Depends(get_db)) -> dict[str
 
 @router.post("/playbooks/{playbook_id}/import", status_code=201)
 def playbook_import(playbook_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Import a template, or duplicate one of your own playbooks (the copy gets "(copy)" in its name)."""
     t = get_or_404(db, Playbook, playbook_id)
-    p = Playbook(name=t.name, description=t.description, category=t.category, steps=list(t.steps or []), settings=dict(t.settings or {}))
-    db.add(p)
-    db.flush()
-    return playbook_out(p)
+    return playbook_out(_copy(db, t, t.name if t.is_template else f"{t.name} (copy)"))
 
 
 @router.get("/playbooks/{playbook_id}")
@@ -280,17 +312,12 @@ def playbook_get(playbook_id: str, db: Session = Depends(get_db)) -> dict[str, A
 
 @router.put("/playbooks/{playbook_id}")
 def playbook_update(playbook_id: str, body: PlaybookIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    from app.services.playbooks import validate_steps
-
     p = get_or_404(db, Playbook, playbook_id)
     if p.is_template:
         raise HTTPException(422, "import the template first, then edit your copy")
-    try:
-        validate_steps(body.steps)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
-    for k, v in body.model_dump().items():
+    for k, v in _clean(body).items():
         setattr(p, k, v)
+    db.flush()
     return playbook_out(p)
 
 
@@ -309,14 +336,35 @@ class RunIn(BaseModel):
 
 @router.post("/playbooks/{playbook_id}/run", status_code=201)
 def playbook_run(playbook_id: str, body: RunIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    from app.services.playbooks import run_playbook
+    from app.services.playbooks import estimate_minutes, run_playbook
 
     p = get_or_404(db, Playbook, playbook_id)
+    for pid in set(body.product_ids):
+        get_or_404(db, Product, pid)
     try:
         b = run_playbook(db, p, body.product_ids, brand_id=body.brand_id, max_jobs=get_settings().max_jobs_per_batch)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    return {"batch_id": b.id, "total": b.total}
+    return {"batch_id": b.id, "total": b.total, "estimate_minutes": estimate_minutes(p.steps or [], len(set(body.product_ids)))}
+
+
+@router.get("/playbooks/{playbook_id}/runs")
+def playbook_runs(playbook_id: str, limit: int = 10, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Recent runs of this playbook with per-status job counts."""
+    from sqlalchemy import func
+
+    from app.db.models import Job
+
+    get_or_404(db, Playbook, playbook_id)
+    out = []
+    for b in db.scalars(select(FactoryBatch).order_by(FactoryBatch.created_at.desc()).limit(300)):
+        if (b.config or {}).get("playbook_id") != playbook_id:
+            continue
+        counts = dict(db.execute(select(Job.status, func.count()).where(Job.batch_id == b.id).group_by(Job.status)).all())
+        out.append({"id": b.id, "total": b.total, "counts": counts, "created_at": b.created_at})
+        if len(out) >= max(1, min(limit, 50)):
+            break
+    return out
 
 
 # ---------------------------------------------------------------- Scale: apply design to a different product

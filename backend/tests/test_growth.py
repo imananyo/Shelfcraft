@@ -162,6 +162,41 @@ def test_playbook_library_import_edit_run(client, prod):
     assert run_pending_jobs() == ["succeeded", "succeeded"]
 
 
+def test_playbook_steps_are_cleaned_and_checked(client, prod):
+    mine = client.post("/api/playbooks", json={"name": "  Kit  ", "settings": {"style": "luxury", "junk": 1}, "steps": [
+        # stale keys from a previous step kind must be dropped
+        {"kind": "listing_copy", "marketplace": "walmart", "language": "de", "creative_type": "hero", "extra_prompt": "x"},
+        {"kind": "video", "aspect": "9:16", "duration": "20", "voiceover": 1, "tier": "basic"},
+        {"kind": "aplus", "tier": "mobile", "modules": ["hero_banner", "brand_story"]},
+        {"kind": "packaging", "count": 5}]}).json()
+    assert mine["name"] == "Kit" and mine["settings"] == {"style": "luxury"}
+    assert mine["steps"][0] == {"kind": "listing_copy", "marketplace": "walmart", "language": "de"}
+    assert mine["steps"][1] == {"kind": "video", "aspect": "9:16", "duration": 20, "voiceover": True}
+    assert mine["estimate_minutes"] > 0
+    for bad in ([{"kind": "creative"}], [{"kind": "creative", "creative_type": "hero", "style": "neon"}],
+                [{"kind": "video", "duration": 999}], [{"kind": "listing_copy", "marketplace": "ebay"}],
+                [{"kind": "aplus", "modules": ["nope"]}], [{"kind": "creative", "creative_type": "hero", "width": 10}]):
+        r = client.put(f"/api/playbooks/{mine['id']}", json={"name": "x", "steps": bad})
+        assert r.status_code == 422, bad
+    opts = client.get("/api/playbooks/options").json()
+    assert "white_bg_main" in opts["creative_types"] and "de" in opts["languages"] and "hero_banner" in opts["aplus_modules"]
+
+
+def test_playbook_duplicate_runs_history_and_dedupe(client, prod):
+    mine = client.post("/api/playbooks", json={"name": "Solo", "steps": [{"kind": "creative", "creative_type": "white_bg_main"}]}).json()
+    dup = client.post(f"/api/playbooks/{mine['id']}/import").json()
+    assert dup["name"] == "Solo (copy)" and dup["id"] != mine["id"]
+    assert client.post(f"/api/playbooks/{mine['id']}/run", json={"product_ids": ["missing"]}).status_code == 404
+    run = client.post(f"/api/playbooks/{mine['id']}/run", json={"product_ids": [prod["id"], prod["id"]]}).json()
+    assert run["total"] == 1 and run["estimate_minutes"] > 0
+    run_pending_jobs()
+    runs = client.get(f"/api/playbooks/{mine['id']}/runs").json()
+    assert [r["id"] for r in runs] == [run["batch_id"]] and runs[0]["counts"] == {"succeeded": 1}
+    assert client.get(f"/api/playbooks/{dup['id']}/runs").json() == []
+    lib = {p["name"] for p in client.get("/api/playbooks", params={"templates": True}).json()}
+    assert {"Multi-marketplace copy", "EU expansion copy", "A+ & brand story"} <= lib
+
+
 def test_apply_design_to_different_product(client, prod):
     other = client.post("/api/products", json={"name": "Camp Mug", "features": ["Enamel", "Stackable", "Light"],
                                                 "benefits": ["Tough", "Packs small", "Lightweight"]}).json()

@@ -14,6 +14,22 @@ from app.services.documents import create_document, document_json
 from app.services.templates import _PH, default_values
 
 STEP_KINDS = {"creative", "listing_copy", "research", "video", "aplus", "packaging"}
+STYLES = {"minimal", "luxury", "natural", "vibrant", "editorial", "tech"}
+ASPECTS = {"16:9", "9:16", "1:1", "4:5"}
+APLUS_TIERS = {"premium", "basic", "mobile"}
+DEFAULT_APLUS_MODULES = ["hero_banner", "feature_row", "comparison"]
+# Rough CPU-only minutes per step on a 4-core laptop (shown as an estimate before a run).
+STEP_MINUTES = {"creative": 1.0, "listing_copy": 2.5, "research": 3.0, "video": 1.5, "aplus": 0.5, "packaging": 2.5}
+# Which keys each step kind keeps (anything else is dropped so stale fields never leak between kinds).
+_STEP_KEYS = {
+    "creative": {"creative_type", "style", "extra_prompt", "width", "height"},
+    "listing_copy": {"marketplace", "language", "country"},
+    "research": set(),
+    "video": {"aspect", "duration", "voiceover"},
+    "aplus": {"tier", "modules"},
+    "packaging": {"count"},
+}
+_SETTING_KEYS = {"style", "marketplace", "width", "height"}
 
 # Original Shelfcraft recipes (structure inspired by common seller workflows).
 LIBRARY: list[dict[str, Any]] = [
@@ -45,6 +61,21 @@ LIBRARY: list[dict[str, Any]] = [
          {"kind": "creative", "creative_type": "white_bg_main"}, {"kind": "creative", "creative_type": "lifestyle"},
          {"kind": "creative", "creative_type": "feature"}, {"kind": "aplus", "tier": "premium"},
          {"kind": "video", "aspect": "16:9", "duration": 15}]},
+    {"name": "Multi-marketplace copy", "category": "listing", "description":
+     "Research once, then listing copy for Amazon, Walmart and Shopify — each within that marketplace's limits.",
+     "settings": {}, "steps": [
+         {"kind": "research"}, {"kind": "listing_copy", "marketplace": "amazon"},
+         {"kind": "listing_copy", "marketplace": "walmart"}, {"kind": "listing_copy", "marketplace": "shopify"}]},
+    {"name": "EU expansion copy", "category": "launch", "description":
+     "Amazon listing copy written natively in German, French, Spanish and Italian (not word-for-word translations).",
+     "settings": {"marketplace": "amazon"}, "steps": [
+         {"kind": "listing_copy", "language": "de", "country": "DE"}, {"kind": "listing_copy", "language": "fr", "country": "FR"},
+         {"kind": "listing_copy", "language": "es", "country": "ES"}, {"kind": "listing_copy", "language": "it", "country": "IT"}]},
+    {"name": "A+ & brand story", "category": "listing", "description":
+     "Premium A+ layout with brand story and comparison, plus matching lifestyle and detail images.",
+     "settings": {"style": "editorial"}, "steps": [
+         {"kind": "aplus", "tier": "premium", "modules": ["hero_banner", "brand_story", "feature_row", "comparison"]},
+         {"kind": "creative", "creative_type": "lifestyle"}, {"kind": "creative", "creative_type": "detail"}]},
 ]
 
 
@@ -56,21 +87,95 @@ def seed_library(db: Session) -> None:
                             settings=t["settings"], is_template=True))
 
 
+def _int(v: Any, lo: int, hi: int, what: str) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a number") from None
+    if not lo <= n <= hi:
+        raise ValueError(f"{what} must be between {lo} and {hi}")
+    return n
+
+
+def _size(out: dict[str, Any], src: dict[str, Any], where: str) -> None:
+    for k in ("width", "height"):
+        if src.get(k) not in (None, ""):
+            out[k] = _int(src[k], 256, 4096, f"{where} {k}")
+
+
 def validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Check every step and return cleaned copies (unknown keys dropped, values range-checked)."""
+    from app.services.growth import LANGUAGES
+    from app.services.marketplaces import MARKETPLACES
+
     if not steps:
         raise ValueError("a playbook needs at least one step")
     if len(steps) > 20:
         raise ValueError("at most 20 steps")
-    for s in steps:
-        if s.get("kind") not in STEP_KINDS:
-            raise ValueError(f"unknown step kind {s.get('kind')}")
-        if s["kind"] == "creative" and s.get("creative_type") not in CREATIVE_TYPES:
-            raise ValueError(f"unknown creative type {s.get('creative_type')}")
-    return steps
+    out: list[dict[str, Any]] = []
+    for n, s in enumerate(steps, 1):
+        kind = s.get("kind")
+        if kind not in STEP_KINDS:
+            raise ValueError(f"step {n}: unknown step kind {kind}")
+        c: dict[str, Any] = {"kind": kind}
+        c.update({k: v for k, v in s.items() if k in _STEP_KEYS[kind] and v not in (None, "")})
+        if kind == "creative":
+            if c.get("creative_type") not in CREATIVE_TYPES:
+                raise ValueError(f"step {n}: choose an image type")
+            if c.get("style") and c["style"] not in STYLES:
+                raise ValueError(f"step {n}: unknown style {c['style']}")
+            if "extra_prompt" in c:
+                c["extra_prompt"] = str(c["extra_prompt"]).strip()[:500] or None
+            _size(c, s, f"step {n}")
+        elif kind == "listing_copy":
+            if c.get("marketplace") and c["marketplace"] not in MARKETPLACES:
+                raise ValueError(f"step {n}: unknown marketplace {c['marketplace']}")
+            if c.get("language") and c["language"] not in LANGUAGES:
+                raise ValueError(f"step {n}: unsupported language {c['language']}")
+            if "country" in c:
+                c["country"] = str(c["country"]).strip().upper()[:2] or None
+        elif kind == "video":
+            if c.get("aspect") and c["aspect"] not in ASPECTS:
+                raise ValueError(f"step {n}: unknown aspect ratio {c['aspect']}")
+            if "duration" in c:
+                c["duration"] = _int(c["duration"], 5, 60, f"step {n} video length")
+            c["voiceover"] = bool(c.get("voiceover"))
+        elif kind == "aplus":
+            from app.routers.aplus import MODULE_TYPES
+
+            if c.get("tier") and c["tier"] not in APLUS_TIERS:
+                raise ValueError(f"step {n}: unknown A+ tier {c['tier']}")
+            mods = c.get("modules")
+            if mods is not None:
+                if not isinstance(mods, list) or not mods or len(mods) > 7 or any(m not in MODULE_TYPES for m in mods):
+                    raise ValueError(f"step {n}: choose 1–7 valid A+ modules")
+        elif kind == "packaging" and "count" in c:
+            c["count"] = _int(c["count"], 1, 20, f"step {n} idea count")
+        out.append({k: v for k, v in c.items() if v is not None})
+    return out
+
+
+def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Playbook-wide defaults that a step can override (style, marketplace, image size)."""
+    from app.services.marketplaces import MARKETPLACES
+
+    c: dict[str, Any] = {k: v for k, v in (settings or {}).items() if k in _SETTING_KEYS and v not in (None, "")}
+    if c.get("style") and c["style"] not in STYLES:
+        raise ValueError(f"unknown default style {c['style']}")
+    if c.get("marketplace") and c["marketplace"] not in MARKETPLACES:
+        raise ValueError(f"unknown default marketplace {c['marketplace']}")
+    _size(c, settings or {}, "default image")
+    return c
+
+
+def estimate_minutes(steps: list[dict[str, Any]], products: int = 1) -> float:
+    per = sum(STEP_MINUTES.get(s.get("kind", ""), 1.0) + (1.0 if s.get("voiceover") else 0.0) for s in steps)
+    return round(per * max(products, 1), 1)
 
 
 def run_playbook(db: Session, playbook: Playbook, product_ids: list[str], *, brand_id: str | None, max_jobs: int) -> FactoryBatch:
     steps = validate_steps(list(playbook.steps or []))
+    product_ids = list(dict.fromkeys(product_ids))  # a product picked twice runs once
     total = len(steps) * len(product_ids)
     if total > max_jobs:
         raise ValueError(f"{total} steps exceeds the per-run limit of {max_jobs}")
