@@ -1,6 +1,7 @@
 """Health, dashboard, global search, notifications, backups, onboarding."""
 from __future__ import annotations
 
+import platform
 import shutil
 import sqlite3
 import sys
@@ -76,6 +77,8 @@ def capabilities() -> dict[str, Any]:
         "video": bool(find_tool("ffmpeg")),
         # Real paths on this machine, so the MCP config snippet works on Windows, macOS and Linux.
         "mcp": {"command": sys.executable, "script": str(BACKEND_DIR / "mcp_server.py")},
+        # So the UI shows Windows (.ps1) or macOS/Linux (.sh) commands for the computer Shelfcraft runs on.
+        "os": {"Windows": "windows", "Darwin": "mac"}.get(platform.system(), "linux"),
     }
 
 

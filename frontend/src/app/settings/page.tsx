@@ -9,7 +9,7 @@ import { Field, Input, Select, Switch } from "@/components/ui/form";
 import { Badge, Card, Notice, PageHeader, Skeleton, TabPanel, Tabs } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlay";
 import { download, get, patch, post } from "@/lib/api";
-import { useApi, useProviders, useSettings } from "@/lib/hooks";
+import { useApi, useProviders, useScriptCommand, useSettings } from "@/lib/hooks";
 import type { ProviderStatus } from "@/lib/types";
 import { formatBytes, timeAgo } from "@/lib/utils";
 import { ApiTab, IntegrationsTab, TeamTab } from "./settings-extra";
@@ -90,6 +90,7 @@ function Providers() {
 }
 
 function ProviderCard({ p, onToggle, onChange }: { p: ProviderStatus; onToggle: (on: boolean) => void; onChange: () => void }) {
+  const cmd = useScriptCommand();
   const [key, setKey] = React.useState("");
   const [acct, setAcct] = React.useState(p.extra.account_id ?? "");
   const [model, setModel] = React.useState(p.text_model ?? "");
@@ -145,8 +146,8 @@ function ProviderCard({ p, onToggle, onChange }: { p: ProviderStatus; onToggle: 
         <Button size="sm" variant="outline" onClick={runTest} loading={testing} disabled={p.state === "ineligible"}>Test connection</Button>
         {test && <span className={`flex items-center gap-1 text-xs ${test.ok ? "text-success" : "text-danger"}`}>{test.ok ? <CircleCheck className="size-3.5" /> : <CircleAlert className="size-3.5" />}{test.detail}</span>}
       </div>
-      {p.name === "ollama" && !p.configured && <Notice tone="warning" className="text-xs">Ollama isn&apos;t running. Start it from the Start menu (or run <code>ollama serve</code>), then pull a model: <code>ollama pull qwen2.5:3b</code></Notice>}
-      {p.name === "local_diffusion" && !p.configured && <Notice tone="warning" className="text-xs">Not installed. Run <code>scripts\install-local-image-model.ps1</code> (downloads PyTorch CPU + ~2.5 GB model).</Notice>}
+      {p.name === "ollama" && !p.configured && <Notice tone="warning" className="text-xs">Ollama isn&apos;t running. Start the Ollama app (or run <code>ollama serve</code>), then pull a model: <code>ollama pull qwen2.5:3b</code></Notice>}
+      {p.name === "local_diffusion" && !p.configured && <Notice tone="warning" className="text-xs">Not installed. Run <code>{cmd.run("install-local-image-model")}</code> (downloads PyTorch CPU + ~2.5 GB model).</Notice>}
       <p className="text-[11.5px] text-muted"><b>Privacy:</b> {p.privacy_note}</p>
       {(p.last_error || p.last_success_at) && (
         <div className="border-t border-border pt-2 text-[11.5px] text-muted">
@@ -261,6 +262,7 @@ function Usage() {
 }
 
 function Data() {
+  const cmd = useScriptCommand();
   const storage = useApi<{ media: Record<string, number>; database_bytes: number; data_dir: string }>(["storage"], "/storage");
   const backups = useApi<{ name: string; size_bytes: number; created_at: string }[]>(["backups"], "/backups");
   const health = useApi<{ status: string; checks: Record<string, string | number> }>(["health"], "/health");
@@ -288,7 +290,7 @@ function Data() {
       <Card className="flex flex-col gap-3 p-5 lg:col-span-2">
         <div className="flex items-center justify-between"><h3 className="text-[14.5px] font-semibold">Backups</h3>
           <Button loading={busy} onClick={async () => { setBusy(true); try { const r = await post<{ name: string }>("/backups"); toast.success(`Backup created: ${r.name}`); backups.refetch(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); } }}>Create backup now</Button></div>
-        <p className="text-[12.5px] text-muted">A backup is a ZIP with a consistent copy of the database and all media. To restore, stop Shelfcraft and run <code>scripts\restore.ps1 -Backup &lt;file&gt;</code> (see README).</p>
+        <p className="text-[12.5px] text-muted">A backup is a ZIP with a consistent copy of the database and all media. To restore, stop Shelfcraft and run <code>{cmd.run("restore", "-Backup <file>", "<file>")}</code> (see README).</p>
         {backups.data?.length ? backups.data.map((b) => (
           <div key={b.name} className="flex items-center justify-between rounded-[10px] border border-border px-3 py-2 text-[13px]"><span className="font-mono text-xs">{b.name}</span><span className="text-xs text-muted">{formatBytes(b.size_bytes)}</span>
             <Button size="sm" variant="outline" onClick={() => download(`/backups/${b.name}`)}>Download</Button></div>

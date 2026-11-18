@@ -36,7 +36,7 @@ const GUIDES: Guide[] = [
     steps: [["Open Factory, select products and creative types.", "/factory"], ["Preview the count and CPU estimate, then start."], ["Retry failed items and download one ZIP per product."]] },
   { id: "share", title: "Share with your team or client", minutes: 1, tags: ["Share"],
     summary: "A view-only gallery link — no sign-in needed.",
-    steps: [["On a listing, A+ or video page click Share → Create share link."], ["Copy the link. Others on your network can open it (start with start.ps1 -Lan)."], ["Revoke it any time from the same dialog."]] },
+    steps: [["On a listing, A+ or video page click Share → Create share link."], ["Copy the link. Others on your network can open it (start Shelfcraft with the -Lan / --lan option)."], ["Revoke it any time from the same dialog."]] },
   { id: "models", title: "Choose AI models (free and premium)", minutes: 2, tags: ["Settings"],
     summary: "Free local models by default; optional Nano Banana and GPT with your own key.",
     steps: [["Settings → AI providers shows every engine and its state.", "/settings"], ["Free: Ollama (text) and local diffusion (images) run on this PC."],

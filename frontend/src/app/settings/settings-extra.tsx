@@ -9,7 +9,7 @@ import { Field, Input, Select, Switch } from "@/components/ui/form";
 import { Badge, Card, Notice } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlay";
 import { del, patch, post } from "@/lib/api";
-import { useApi, useCapabilities } from "@/lib/hooks";
+import { useApi, useCapabilities, useScriptCommand } from "@/lib/hooks";
 import { timeAgo } from "@/lib/utils";
 
 const copy = async (text: string, what = "Copied") => { await navigator.clipboard.writeText(text); toast.success(what); };
@@ -25,6 +25,7 @@ export function TeamTab() {
   const [inv, setInv] = React.useState({ email: "", role: "editor" });
   const [link, setLink] = React.useState<string | null>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ["members"] }); qc.invalidateQueries({ queryKey: ["auth"] }); };
+  const cmd = useScriptCommand();
   if (!auth.data) return null;
   if (!auth.data.team_mode) {
     return (
@@ -39,7 +40,7 @@ export function TeamTab() {
         </Card>
         <Notice>
           <b>How teammates reach Shelfcraft.</b> By default Shelfcraft only accepts connections from this computer. To let teammates on your network join,
-          start it with <code>scripts\start.ps1 -Prod -Lan</code> after enabling team mode, and share <code>http://&lt;this-PC&apos;s-IP&gt;:3000</code> plus their invite link.
+          start it with <code>{cmd.run("start", "-Prod -Lan", "--prod --lan")}</code> after enabling team mode, and share <code>http://&lt;this-computer&apos;s-IP&gt;:3000</code> plus their invite link.
           Shelfcraft doesn&apos;t send emails — you share invite links yourself.
         </Notice>
       </div>
@@ -92,6 +93,9 @@ export function ApiTab() {
     command: caps.data?.mcp?.command ?? "<shelfcraft>/backend/.venv/bin/python",
     args: [caps.data?.mcp?.script ?? "<shelfcraft>/backend/mcp_server.py"],
     env: { SHELFCRAFT_API_KEY: created ?? "sk_shelf_…", SHELFCRAFT_API_URL: "http://127.0.0.1:8000" } } } }, null, 2);
+  // Real paths on the computer running Shelfcraft (Windows, macOS or Linux).
+  const claudeCmd = `claude mcp add shelfcraft -e SHELFCRAFT_API_KEY=${created ?? "sk_shelf_…"} -- "${caps.data?.mcp?.command ?? "<shelfcraft>/backend/.venv/bin/python"}" "${caps.data?.mcp?.script ?? "<shelfcraft>/backend/mcp_server.py"}"`;
+  const cmd = useScriptCommand();
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="flex flex-col gap-4">
@@ -118,7 +122,7 @@ export function ApiTab() {
           <h3 className="text-[15px] font-semibold">Public API</h3>
           <p className="text-muted">REST API at <code>{api}/v1</code> with interactive docs at <a className="text-primary underline" href={`${api}/v1/docs`} target="_blank" rel="noreferrer">{api}/v1/docs</a>. 120 requests/minute per key. The app&apos;s own local API (<code>/api</code>) is unchanged.</p>
           <pre className="overflow-x-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{`curl -H "Authorization: Bearer sk_shelf_…" ${api}/v1/products`}</pre>
-          <Notice className="text-xs">The API listens on this computer only. To use it from elsewhere, run Shelfcraft with <code>-Lan</code> (team mode required) or put it behind your own secure tunnel — never expose it without a key.</Notice>
+          <Notice className="text-xs">The API listens on this computer only. To use it from elsewhere, run Shelfcraft with <code>{cmd.windows ? "-Lan" : "--lan"}</code> (team mode required) or put it behind your own secure tunnel — never expose it without a key.</Notice>
         </Card>
       </div>
       <Card className="flex flex-col gap-3 p-5 text-[13px]">
@@ -128,7 +132,7 @@ export function ApiTab() {
         <pre className="max-h-72 overflow-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{mcpJson}</pre>
         <Button size="sm" variant="outline" className="w-fit" onClick={() => copy(mcpJson, "MCP config copied")}><Copy />Copy config</Button>
         <div className="font-medium">Claude Code:</div>
-        <pre className="overflow-x-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{`claude mcp add shelfcraft -e SHELFCRAFT_API_KEY=${created ?? "sk_shelf_…"} -- "C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\.venv\\Scripts\\python.exe" "C:\\Users\\dutta\\Desktop\\shelfcraft1\\backend\\mcp_server.py"`}</pre>
+        <pre className="overflow-x-auto rounded-[10px] bg-sunken p-3 text-[11.5px]">{claudeCmd}</pre>
         <p className="text-xs text-muted">Tools: list_brands, list_products, get_product, create_product, create_listing, get_listing, translate_listing, grade_listing, generate_creative, get_job, wait_for_job, get_asset. Shelfcraft must be running.</p>
       </Card>
     </div>

@@ -27,7 +27,7 @@ export function ShareButton({ projectId }: { projectId: string }) {
           {s?.enabled ? (
             <>
               <div className="flex gap-2"><Input readOnly value={full} onFocus={(e) => e.currentTarget.select()} /><Button onClick={copy}><Copy />Copy</Button></div>
-              <Notice className="text-[12.5px]">The link works for people who can reach this computer (e.g. on your Wi-Fi with <code>start.ps1 -Lan</code>).</Notice>
+              <Notice className="text-[12.5px]">The link works for people who can reach this computer (e.g. on your Wi-Fi with the <code>-Lan</code> / <code>--lan</code> start option).</Notice>
               <div className="flex justify-between">
                 <a href={s.url!} target="_blank" rel="noreferrer" className="text-[13px] text-primary underline">Open gallery</a>
                 <Button variant="ghost" loading={busy} onClick={() => run(() => del(`/projects/${projectId}/share`).then(() => ({ enabled: false, url: null })))}>Revoke link</Button>

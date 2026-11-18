@@ -100,6 +100,12 @@ if [ ! -f "$ROOT/backend/.env" ]; then
 fi
 
 step "Frontend: npm install"
+# A node_modules copied from Windows holds Windows-only native binaries (Next.js SWC, Tailwind, sharp) and npm
+# does not always replace them, so the web app would fail to start. Reinstall from scratch in that case.
+if compgen -G "$ROOT/frontend/node_modules/@next/swc-win32-*" >/dev/null; then
+  warn "frontend/node_modules was copied from Windows; reinstalling it for this computer."
+  rm -rf "$ROOT/frontend/node_modules"
+fi
 ( cd "$ROOT/frontend" && npm install --no-fund --no-audit )
 
 chmod +x "$ROOT"/scripts/*.sh 2>/dev/null || true

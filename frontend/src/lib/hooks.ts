@@ -35,7 +35,20 @@ export function useProviders() {
 
 export function useCapabilities() {
   return useApi<{ text_ai: boolean; image_ai: boolean; local_diffusion_installed: boolean; background_removal: boolean;
-    object_removal_ai: boolean; video: boolean; mcp?: { command: string; script: string } }>(["capabilities"], "/capabilities", { refetchInterval: 30000 });
+    object_removal_ai: boolean; video: boolean; mcp?: { command: string; script: string };
+    os?: "windows" | "mac" | "linux" }>(["capabilities"], "/capabilities", { refetchInterval: 30000 });
+}
+
+/** Script commands for the OS Shelfcraft runs on: `scripts\start.ps1 -Lan` on Windows, `bash scripts/start.sh --lan` elsewhere. */
+export function useScriptCommand() {
+  const os = useCapabilities().data?.os
+    ?? (typeof navigator !== "undefined" && /Win/i.test(navigator.userAgent) ? "windows" : "mac");
+  const windows = os === "windows";
+  return {
+    os, windows,
+    run: (name: string, winArgs = "", unixArgs = "") =>
+      windows ? `scripts\\${name}.ps1${winArgs ? ` ${winArgs}` : ""}` : `bash scripts/${name}.sh${unixArgs ? ` ${unixArgs}` : ""}`,
+  };
 }
 
 /** Poll a job until it finishes; fires callbacks once. */
