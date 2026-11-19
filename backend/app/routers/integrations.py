@@ -210,6 +210,48 @@ class SourceIn(BaseModel):
     brand_id: str | None = None
 
 
+AMAZON_SHORT_HOSTS = ("amzn.in", "amzn.to", "amzn.eu", "amzn.asia", "amzn.com", "a.co")
+
+
+def resolve_amazon_short_link(value: str) -> str:
+    """Expand an Amazon share link (amzn.in/d/..., amzn.to/..., a.co/...) to the full product URL.
+
+    Only the redirect's Location header is read (the product page itself is not downloaded here).
+    Anything that isn't a short link is returned unchanged; if expansion fails the input is returned too.
+    """
+    v = value.strip()
+    host = (re.sub(r"^https?://", "", v, flags=re.I).split("/")[0]).lower().split(":")[0]
+    host = host[4:] if host.startswith("www.") else host
+    if host not in AMAZON_SHORT_HOSTS:
+        return value
+    url = v if re.match(r"^https?://", v, re.I) else "https://" + v
+    try:
+        with httpx.Client(timeout=10.0, follow_redirects=False,
+                          headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                                 "(KHTML, like Gecko) Chrome/130 Safari/537.36"}) as c:
+            for _ in range(5):
+                r = c.get(url)
+                loc = r.headers.get("location")
+                if r.status_code not in (301, 302, 303, 307, 308) or not loc:
+                    break
+                url = str(httpx.URL(url).join(loc))
+                if AMAZON_URL_ASIN.search(url):
+                    return url
+    except httpx.HTTPError:
+        return value
+    return url if AMAZON_URL_ASIN.search(url) else value
+
+
+def amazon_country_from_link(value: str) -> str | None:
+    """Country code of the Amazon domain in a pasted link (e.g. amazon.in -> "IN"), or None."""
+    host = (re.sub(r"^https?://", "", value.strip(), flags=re.I).split("/")[0]).lower().split(":")[0]
+    host = host[4:] if host.startswith("www.") else host
+    for code, domain in AMAZON_DOMAINS.items():
+        if host == domain or host.endswith("." + domain):
+            return code
+    return None
+
+
 def classify_source(kind: str, value: str) -> tuple[str, str]:
     """Normalize user input to ("asin", ASIN) | ("walmart", item id) | ("url", url). Marketplace URLs are mapped
     to their identifier so we never fetch Amazon/Walmart pages."""
@@ -402,8 +444,14 @@ def import_source(body: SourceIn, db: Session = Depends(get_db)) -> dict[str, An
     from app.db.models import Product
     from app.services.web_extract import extract_product_from_url
 
-    kind, ident = classify_source(body.kind, body.value)
+    value = resolve_amazon_short_link(body.value)  # amzn.in/d/... -> https://www.amazon.in/dp/<ASIN>
+    kind, ident = classify_source(body.kind, value)
     country = body.country if body.country in MARKETPLACE_IDS else "US"
+    # A pasted Amazon link names its own marketplace (amazon.in, amazon.co.uk, ...): use it instead of the
+    # country picker, otherwise an amazon.in ASIN is looked up on amazon.com and comes back 404.
+    link_country = amazon_country_from_link(value)
+    if link_country:
+        country = link_country
 
     if kind == "asin":
         row = _cfg(db)
