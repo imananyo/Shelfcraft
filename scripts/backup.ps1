@@ -27,5 +27,15 @@ tmp.unlink()
 print(out)
 '@
 if (-not $Destination) { $Destination = Join-Path $Root "data\backups" }
-$out = & $py -c $code $Root $Destination
+if (-not (Test-Path $py)) { throw "Python environment not found at $py - run scripts\setup.ps1 first." }
+# Run the code from a temporary file: Windows PowerShell 5.1 strips the double quotes inside a multi-line
+# argument passed to a native program, so `python -c $code` received broken Python (SyntaxError).
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("shelfcraft-backup-" + [Guid]::NewGuid().ToString("N") + ".py")
+try {
+  [IO.File]::WriteAllText($tmp, $code, (New-Object System.Text.UTF8Encoding($false)))
+  $out = & $py -I $tmp $Root $Destination
+  if ($LASTEXITCODE -ne 0 -or -not $out) { throw "Backup failed (python exit code $LASTEXITCODE). See the error above." }
+} finally {
+  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+}
 Write-Host "Backup written: $out" -ForegroundColor Green

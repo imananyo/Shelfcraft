@@ -200,8 +200,7 @@ data/      (created at runtime, git-ignored) database, media, models, logs, back
 
 * **In the app:** Settings → Storage & data → *Create backup now* (ZIP of database + media).
 * **Command line:** `scripts\backup.ps1 [-Destination D:\Backups]` — works while the app is running (SQLite online backup).
-  **Known issue:** under Windows PowerShell 5.1 this script currently fails (it prints a Python *SyntaxError* and an
-  empty "Backup written:") because PowerShell strips the quotes of the inline Python code. Use the in-app backup until it is fixed.
+  It stops with "Backup failed" (instead of reporting success) if the backup could not be written.
 * **Command line (macOS / Linux):** use the in-app backup above.
 * **Restore:** stop the app, then `scripts\restore.ps1 -Backup <zip>` (Windows) or `bash scripts/restore.sh <zip>` (macOS / Linux). Your current data is moved to
   `data\pre-restore-<timestamp>` first, so a wrong restore is reversible.

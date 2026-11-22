@@ -103,6 +103,9 @@ test("new listing: add a product inline and it is auto-selected", async ({ page 
 });
 test("listing grader: paste a listing and get a score with fixes", async ({ page }) => {
   await page.goto("/grader");
+  // The grader opens on "From an Amazon URL"; this journey uses the paste form.
+  await expect(page.getByRole("textbox", { name: "Amazon product link or ASIN" })).toBeVisible();
+  await page.getByRole("tab", { name: "Paste a listing" }).click();
   await page.locator("textarea").first().fill("BEST SALE water bottle");
   await page.getByRole("button", { name: "Grade listing" }).click();
   await expect(page.getByText(/^Grade [A-F]$/)).toBeVisible();
