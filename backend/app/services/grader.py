@@ -146,7 +146,10 @@ def _section(key: str, checks: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def grade(listing: dict[str, Any], images: list[Image.Image], *, marketplace: str = "amazon", brand: str | None = None,
-          has_aplus: bool = False) -> dict[str, Any]:
+          has_aplus: bool = False, skip: dict[str, str] | None = None) -> dict[str, Any]:
+    """`skip` maps section keys that can't be judged (e.g. search terms of a public page) to the reason; those
+    sections are left out of the score instead of counting as zero."""
+    skip = {k: v for k, v in (skip or {}).items() if k in WEIGHTS}
     keywords = listing.get("keywords") or []
     if isinstance(keywords, str):
         keywords = [k.strip() for k in keywords.split(",") if k.strip()]
@@ -158,11 +161,13 @@ def grade(listing: dict[str, Any], images: list[Image.Image], *, marketplace: st
         grade_images(images, marketplace),
         grade_aplus(has_aplus),
     ]
-    total = round(sum(s["score"] * WEIGHTS[s["key"]] for s in sections) / sum(WEIGHTS.values()))
+    sections = [s for s in sections if s["key"] not in skip]
+    total = round(sum(s["score"] * WEIGHTS[s["key"]] for s in sections) / sum(WEIGHTS[s["key"]] for s in sections))
     fixes = [c | {"section": s["key"]} for s in sections for c in s["checks"] if not c["passed"]]
     fixes.sort(key=lambda c: (c["severity"] != "error", -c["max"]))
     grade_letter = "A" if total >= 90 else "B" if total >= 80 else "C" if total >= 65 else "D" if total >= 50 else "F"
     return {"score": total, "grade": grade_letter, "sections": sections, "top_fixes": fixes[:8], "marketplace": marketplace,
+            "skipped": [{"key": k, "reason": v} for k, v in skip.items()],
             "note": "Rule-based guidance from commonly published seller recommendations. Not a ranking prediction or compliance check."}
 
 

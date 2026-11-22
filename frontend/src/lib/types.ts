@@ -5,9 +5,38 @@ export interface Brand {
   secondary_font?: string | null; language: string; tagline?: string | null; tone_of_voice?: string | null;
   target_audience?: string | null; positioning?: string | null; values: string[]; aesthetic: string[];
   visual_identity?: string | null; marketing_guidelines?: string | null; extra_details?: string | null;
-  logo_asset_id?: ID | null; logo_url?: string | null;
+  logo_asset_id?: ID | null; logo_url?: string | null; rules?: BrandRules;
   guidelines: { id: ID; title: string; asset_id?: ID; chars: number; created_at: string }[];
   product_count: number; created_at: string; updated_at: string;
+}
+
+/** Claim & visual rules used by the image planner and copy prompts (backend: app/services/brand_rules.py). */
+export interface BrandRules {
+  safe_claims: string[]; careful_claims: string[]; banned_words: string[]; props_allowed: string[]; props_banned: string[];
+  backgrounds: string[]; fixed_elements: string[]; variable_elements: string[];
+  photo_look: string; layout_notes: string; main_image_rules: string;
+  headline_max_words: number; callouts_max: number; ai_drafted?: boolean;
+}
+
+export type StrategySource = "hook" | "pain_point" | "usp" | "benefit" | "persona" | "review" | "spec";
+
+export interface PlanSlot {
+  slot: string; purpose: string; concept: string; headline: string; callouts: string[]; people: boolean;
+  strategy_source: StrategySource; strategy_note: string; source: "ai" | "fallback" | "user" | "auto";
+  provider?: string | null; model?: string | null; flags: string[];
+}
+
+export interface ImagePlan { slots: PlanSlot[]; brief_id: ID; brand_rules: boolean; created_at: string; edited_by_user: boolean }
+
+export interface SlotStatus { status: "queued" | "running" | "done" | "failed"; job_id?: ID; error?: string; progress?: number; message?: string | null }
+
+export interface CreativeBrief {
+  id: ID; created_at: string; provider?: string; model?: string; stale?: boolean | null; ai_pass?: boolean;
+  sources: { strategy_id?: ID | null; reviews_id?: ID | null; category_id?: ID | null };
+  hook?: string; creative_concept?: string; target?: string;
+  customer_needs?: { feature: string; functional_benefit: string; emotional_benefit: string; problem_solved: string }[];
+  reviews?: { love: string[]; hate: string[]; requests: string[] };
+  strategy?: { positioning?: string; usps?: string[]; pain_points?: string[]; creative_strategy?: Record<string, string | string[]> };
 }
 
 export interface ProductImage { id: ID; asset_id: ID; role: string; position: number; url: string; thumb_url: string; width?: number; height?: number }

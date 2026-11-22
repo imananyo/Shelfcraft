@@ -122,8 +122,11 @@ def listing_prompt(p: Product, brand: Brand | None, brand_txt: str, marketplace:
     mk = MARKETPLACES.get(marketplace, MARKETPLACES["amazon"])
     research_txt = ""
     if research:
-        keep = {k: research.get(k) for k in ("positioning", "usps", "personas", "marketing_angles", "pain_points")}
-        research_txt = f"Prior product research (AI-generated, use as guidance):\n{keep}\n\n"
+        keep = {k: research.get(k) for k in ("positioning", "usps", "personas", "marketing_angles", "pain_points",
+                                             "objections", "creative_strategy") if research.get(k)}
+        research_txt = (f"Prior product research (AI-generated, use as guidance):\n{keep}\n"
+                        + ("Build image_strategy on the research's creative_strategy ideas.\n" if keep.get("creative_strategy") else "")
+                        + "\n")
     return (
         f"Write a {mk['label']} product listing.\n"
         f"Country: {opts.get('country', 'US')}. Language: {opts.get('language', 'en')} — write ALL copy in this language.\n"
@@ -166,8 +169,9 @@ def generate_listing_copy(db: Session, product_id: str, brand_id: str | None, ma
     brand = db.get(Brand, brand_id) if brand_id else None
     from app.services.review_analysis import latest_review_summary
 
-    research = db.query(ProductResearch).filter(ProductResearch.product_id == p.id, ProductResearch.kind.notin_(("reviews", "category"))) \
-        .order_by(ProductResearch.created_at.desc()).first()
+    from app.services.image_plan import latest_strategy
+
+    research = latest_strategy(db, p.id)
     prompt = listing_prompt(p, brand, brand_context(db, brand_id), marketplace, opts,
                             research.result if research else None)
     from app.services.category_analysis import latest_category_summary
@@ -262,7 +266,7 @@ def normalize_copy(copy: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def creative_prompt(p: Product | None, brand: Brand | None, creative_type: str, style: str, extra: str = "",
-                    background_only: bool = True) -> str:
+                    background_only: bool = True, people: bool = False) -> str:
     """Image prompt. In background-only mode the real product photo is composited afterwards."""
     scene = {
         "hero": "product photo backdrop, empty round pedestal, eye-level, soft dramatic light",
@@ -293,7 +297,10 @@ def creative_prompt(p: Product | None, brand: Brand | None, creative_type: str, 
         parts.append(f"{p.category} setting")
     if brand and brand.aesthetic:
         parts.append(", ".join(brand.aesthetic[:3]).lower())
-    parts.append("photorealistic, no text, no watermark" if not background_only else "no text, no people")
+    if people:  # planned lifestyle scenes may show a person; they stay in the background, away from the product
+        parts.append("a person in the background, out of focus")
+    parts.append("photorealistic, no text, no watermark" if not background_only else
+                 ("no text" if people else "no text, no people"))
     return clip_safe(", ".join(parts))
 
 

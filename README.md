@@ -15,6 +15,7 @@ A+ content, bulk "factory" runs and product videos — running on your own Windo
 | Capability | Default engine (free) | Runs on |
 |---|---|---|
 | Listing copy, research, translations | **Ollama** `qwen2.5:3b` | your CPU |
+| Creative brief + image-set plan | same text engine (one small call per image) | your CPU (~2–4 min per set) |
 | Review analysis, category analysis | same text engine (local or free hosted) | your CPU / hosted |
 | Optional faster/better text | Gemini · Groq · OpenRouter `:free` · Cloudflare (free tiers) | hosted, opt-in |
 | Image backgrounds / scenes | **SD-Turbo** via diffusers (CPU) | your CPU (~30 s/image) |
@@ -66,6 +67,23 @@ powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 
 Optional local image generation on macOS / Linux: `bash scripts/install-local-image-model.sh`.
 
+### Running from VS Code
+
+Open the folder (`code .`), then **Ctrl+Shift+P → Tasks: Run Task**:
+
+* **Shelfcraft: Run app (backend + frontend)** — both servers in VS Code terminals; the backend auto-reloads on code changes.
+* **Shelfcraft: Backend** / **Shelfcraft: Frontend** / **Shelfcraft: Start Ollama** / **Shelfcraft: Backend tests**.
+
+Or by hand in two terminals (stop `scripts\start.ps1` first so the ports are free):
+
+```powershell
+cd backend;  .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app
+cd frontend; npm run dev -- -H 127.0.0.1 -p 3000
+```
+
+Always type the full `powershell -ExecutionPolicy Bypass -File scripts\start.ps1` — starting the line with `ExecutionPolicy`
+runs PowerShell's own `Get-ExecutionPolicy` and fails with *ParameterBindingException*.
+
 Optional demo data (a brand, two products, a design):
 
 ```bash
@@ -115,6 +133,36 @@ browser — Shelfcraft never solves CAPTCHAs, rotates proxies or works around bo
   their buyers complain about. Untick a row to leave it out.
 * Listing copy and product research automatically use the latest review and category analyses when you don't paste any.
 
+## Listing image sets: analyse → plan → render
+
+Open a listing → **Image set**. The set is built in three stages (the same overall pattern as hosted tools like Pixii):
+
+1. **Creative brief** (listing → *Strategy & keywords*): product facts + Deep Strategy (including its image ideas) +
+   counted review themes + category benchmark + a short AI pass for the hook, concept and customer needs
+   (feature → benefit → emotional payoff → problem solved). It is saved with the product and reused until one of those
+   sources changes — then it is marked *Out of date* and rebuilt on the next plan.
+2. **Image plan** — **Plan images** writes one plan per slot (main, lifestyle, feature callouts, benefit, comparison,
+   dimensions, detail): purpose, scene, headline, callouts, person in scene, and the strategy point it proves.
+   Shelfcraft assigns each image a *different* point (hook, pain point, USP, review, spec), plans the main and dimensions
+   images without AI, enforces the brand's headline/callout limits, drops callouts not found in the facts and flags
+   banned words. Edit anything, then **Save plan**.
+3. **Render** — every image is its own job with its own progress and **Retry / Re-render**. Your product photo is never
+   redrawn: it is cut out and composited onto an AI background; text is rendered with real fonts as editable layers.
+
+**Brand rules** (brand page → *Brand rules for images & claims* → **Draft with AI**, review, **Save**): claims you can
+make, claims that need care, banned words, photo look, layout notes, allowed/banned props, backgrounds, what stays fixed
+vs. varies, main-image rules and limits. They are used by the image planner and by every copy prompt. The AI draft only
+fills the form; nothing is saved until you save the brand.
+
+## Listing grader
+
+**Grader → From an Amazon URL**: paste any Amazon product link (any domain, share links like `amzn.in/d/…`) or an ASIN
+and press **Import & grade**. The public page is read once: title, bullets, description, brand, price/rating, every
+listing photo (saved to the library tagged *grader* so the image checks use the real images) and whether it has A+
+content. No product is created. Search terms aren't public, so that section is shown as *Not scored* and the score is
+calculated from the other sections (same for the description when A+ replaces it). If Amazon shows a robot check, upload
+the page saved from your browser or paste its source. **Edit fields** moves everything to *Paste a listing*.
+
 ## Project layout
 
 ```
@@ -122,7 +170,8 @@ backend/   FastAPI · SQLAlchemy · Alembic · SQLite · job queue · AI adapter
   app/ai/          provider registry, adapters, free-only fallback, usage tracking
   app/jobs/        persistent queue (retries, backoff, recovery, cancellation) + handlers
   app/imaging/     rembg, LaMa, compositing, palette/layout analysis, Pillow renderer, fonts
-  app/services/    creative pipeline, copywriting, templates, editing, inspire, video, documents
+  app/services/    creative pipeline, image_plan (brief + per-slot plan), brand_rules, copywriting, grader,
+                   marketplace_scrape, templates, editing, inspire, video, documents
   app/routers/     REST API (all under /api)
   tests/           pytest suite
 frontend/  Next.js 16 · React 19 · TypeScript · Tailwind v4 · Radix · Konva
@@ -151,6 +200,8 @@ data/      (created at runtime, git-ignored) database, media, models, logs, back
 
 * **In the app:** Settings → Storage & data → *Create backup now* (ZIP of database + media).
 * **Command line:** `scripts\backup.ps1 [-Destination D:\Backups]` — works while the app is running (SQLite online backup).
+  **Known issue:** under Windows PowerShell 5.1 this script currently fails (it prints a Python *SyntaxError* and an
+  empty "Backup written:") because PowerShell strips the quotes of the inline Python code. Use the in-app backup until it is fixed.
 * **Command line (macOS / Linux):** use the in-app backup above.
 * **Restore:** stop the app, then `scripts\restore.ps1 -Backup <zip>` (Windows) or `bash scripts/restore.sh <zip>` (macOS / Linux). Your current data is moved to
   `data\pre-restore-<timestamp>` first, so a wrong restore is reversible.
@@ -198,4 +249,6 @@ macOS / Linux troubleshooting (Python/Node versions, espeak-ng, fonts, build too
 | Provider card shows "HTTP 404 … model does not exist / no longer available" | Clear *Text model* (automatic) and press **Test connection**; newer versions reset it on their own |
 | Provider card shows "HTTP 429" | That provider's free daily/minute limit is used up — wait, or enable another free provider |
 | Import says CAPTCHA / "robot check" | Use **From your browser**: save the page in your own browser and upload it |
+| Import says "couldn't reach the page (ConnectError)" | Usually a flaky IPv6 route; imports now retry once over IPv4 automatically. Check your connection and import again |
+| "DLL load failed … An Application Control policy has blocked this file" | Windows Smart App Control blocked a compiled package. *Steal the look* no longer needs scikit-learn (its palette uses OpenCV); for other packages, allow the file or turn off Smart App Control |
 | Logs | `data\logs\backend.log`, `data\logs\web.log` |

@@ -46,12 +46,32 @@ def _price(s: Any) -> float | None:
         return None
 
 
+_NETWORK_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError,
+                   httpx.ReadError)
+
+
+def _get(url: str, headers: dict[str, str], timeout: float = 20.0) -> httpx.Response:
+    """GET with one fallback for network-level failures (not for blocks/CAPTCHAs).
+
+    Marketplace CDNs resolve to IPv6 first; on PCs whose IPv6 route is flaky the connection stalls or drops
+    (ConnectError) while IPv4 works. httpx has no automatic IPv6->IPv4 fallback, so on a network error we retry
+    once over IPv4 only. This is a single reconnect, not a retry loop against bot checks.
+    """
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as c:
+            return c.get(url)
+    except _NETWORK_ERRORS:
+        transport = httpx.HTTPTransport(local_address="0.0.0.0")  # binds an IPv4 socket -> IPv4 addresses only
+        with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers, transport=transport) as c:
+            return c.get(url)
+
+
 def fetch_page(url: str) -> str:
     try:
-        with httpx.Client(timeout=20.0, follow_redirects=True, headers=HEADERS) as c:
-            r = c.get(url)
+        r = _get(url, HEADERS)
     except httpx.HTTPError as e:
-        raise ScrapeError(f"couldn't reach the page ({type(e).__name__})") from e
+        raise ScrapeError(f"couldn't reach the page ({type(e).__name__}) — check your internet connection "
+                          "and try the import again") from e
     if r.status_code == 404:
         raise ScrapeError("product not found (HTTP 404) — check the ID and marketplace country")
     if r.status_code >= 400:
@@ -168,6 +188,11 @@ def parse_amazon(html: str) -> dict[str, Any]:
     if t:
         out["name"] = _clean(t.get_text())
     bullets = [_clean(li.get_text()) for li in soup.select("#feature-bullets li span.a-list-item")]
+    if not any(bullets):  # newer layout: "About this item" in the product-facts expander (or the quick-view copy)
+        for sel in ("#productFactsDesktopExpander li span.a-list-item", "#pqv-feature-bullets li span.a-list-item"):
+            bullets = [_clean(li.get_text()) for li in soup.select(sel)]
+            if any(bullets):
+                break
     out["features"] = [b for b in bullets if b and len(b) > 3][:10]
     d = soup.select_one("#productDescription")
     if d and _clean(d.get_text()):
@@ -216,6 +241,19 @@ def parse_amazon(html: str) -> dict[str, Any]:
     if not out.get("name"):
         raise ScrapeError("couldn't find the product on that Amazon page (layout changed or blocked)")
     return out
+
+
+APLUS_SELECTORS = "#aplus, #aplus_feature_div, #aplusBrandStory_feature_div, .aplus-v2, [class*=aplus-module]"
+
+
+def detect_aplus(html: str) -> bool:
+    """True when an Amazon page shows A+ / Brand Story content. Every product page carries the (empty) A+
+    containers, so only containers with images or real text count."""
+    soup = BeautifulSoup(html, "html.parser")
+    for el in soup.select(APLUS_SELECTORS):
+        if el.find("img") or len(el.get_text(" ", strip=True)) > 200:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------- Walmart
@@ -287,7 +325,7 @@ IMAGE_HEADERS = {**HEADERS, "Accept": "image/jpeg,image/png,image/webp;q=0.9,*/*
 
 def download_image(url: str) -> bytes | None:
     try:
-        r = httpx.get(url, timeout=20, headers=IMAGE_HEADERS, follow_redirects=True)
+        r = _get(url, IMAGE_HEADERS)
     except httpx.HTTPError:
         return None
     if r.status_code != 200 or len(r.content) > 15_000_000:

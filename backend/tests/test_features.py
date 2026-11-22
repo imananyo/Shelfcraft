@@ -89,7 +89,8 @@ def test_listing_image_set_uses_copy_strategy(client, product, fake_llm):
     run_pending_jobs()
     r = client.post(f"/api/listings/{lst['id']}/images", json={"slots": ["main_white", "infographic_features", "comparison"]})
     assert r.status_code == 202
-    assert run_pending_jobs() == ["succeeded"]
+    # One planning/queueing job, then one render job per image.
+    assert run_pending_jobs() == ["succeeded"] * 4
     full = client.get(f"/api/listings/{lst['id']}").json()
     assert [i["slot"] for i in full["images"]] == ["main_white", "infographic_features", "comparison"]
     assert not full["image_errors"]

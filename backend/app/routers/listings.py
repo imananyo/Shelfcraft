@@ -18,6 +18,7 @@ from app.jobs.queue import enqueue
 from app.routers.common import get_or_404, soft_delete
 from app.routers.jobs import job_out
 from app.services.copywriting import normalize_copy
+from app.services.image_plan import SLOT_GUIDE, brief_out
 from app.services.marketplaces import MARKETPLACES, SIZE_PRESETS, validate_copy
 
 router = APIRouter(tags=["listings"])
@@ -41,7 +42,7 @@ def start_research(product_id: str, body: ResearchIn, db: Session = Depends(get_
 @router.get("/products/{product_id}/research")
 def list_research(product_id: str, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     rows = db.scalars(select(ProductResearch).where(ProductResearch.product_id == product_id,
-                                                    ProductResearch.kind.notin_(("reviews", "category")))
+                                                    ProductResearch.kind.notin_(("reviews", "category", "brief")))
                       .order_by(ProductResearch.created_at.desc()).limit(10)).all()
     return [{"id": r.id, "result": r.result, "inputs": r.inputs, "provider": r.provider, "model": r.model,
              "created_at": r.created_at} for r in rows]
@@ -73,7 +74,9 @@ def listing_out(db: Session, p: Project) -> dict[str, Any]:
 
     data = p.data or {}
     product = db.get(Product, p.product_id) if p.product_id else None
-    jobs = db.scalars(select(Job).where(Job.project_id == p.id).order_by(Job.created_at.desc()).limit(5)).all()
+    # Per-image render jobs are reported through image_status, not the project's job list.
+    jobs = db.scalars(select(Job).where(Job.project_id == p.id, Job.type != "listing_image_slot")
+                      .order_by(Job.created_at.desc()).limit(5)).all()
     images = []
     for item in data.get("images") or []:
         for aid in item.get("asset_ids", []):
@@ -89,7 +92,29 @@ def listing_out(db: Session, p: Project) -> dict[str, Any]:
         "versions": len(data.get("versions") or []), "images": images, "image_errors": data.get("image_errors", []),
         "limits": MARKETPLACES.get(data.get("marketplace", "amazon"), MARKETPLACES["amazon"])["fields"],
         "jobs": [job_out(j) for j in jobs], "updated_at": p.updated_at, "created_at": p.created_at,
+        "image_plan": data.get("image_plan"), "image_status": _image_status(db, data),
+        "brief": brief_out(db.scalars(select(ProductResearch).where(ProductResearch.product_id == p.product_id,
+                                                                    ProductResearch.kind == "brief")
+                                      .order_by(ProductResearch.created_at.desc()).limit(1)).first(), db)
+        if p.product_id else None,
     }
+
+
+def _image_status(db: Session, data: dict[str, Any]) -> dict[str, Any]:
+    """Stored per-slot status, reconciled with the job table (a crash or restart can leave a slot 'running')."""
+    out: dict[str, Any] = {}
+    for slot, st in (data.get("image_status") or {}).items():
+        st = dict(st)
+        j = db.get(Job, st.get("job_id")) if st.get("job_id") else None
+        if j is not None:
+            jo = job_out(j)
+            st["progress"], st["message"] = jo.get("progress"), jo.get("message")
+            if j.status in ("failed", "cancelled") and st.get("status") != "failed":
+                st.update(status="failed", error=st.get("error") or j.error or j.status)
+            elif j.status == "running":
+                st["status"] = "running"
+        out[slot] = st
+    return out
 
 
 @router.get("/listings")
@@ -172,6 +197,59 @@ class ImagesIn(BaseModel):
     slots: list[str] | None = None
     style: str = "minimal"
     provider: str | None = None
+    replan: bool = False  # rebuild the image plan from the latest brief before rendering
+
+
+class PlanIn(BaseModel):
+    provider: str | None = None
+    rebuild_brief: bool = False  # ignore the saved creative brief and analyse again
+
+
+@router.post("/listings/{project_id}/plan", status_code=202)
+def plan_images(project_id: str, body: PlanIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Build the creative brief (reused when nothing changed) and plan every image slot, without rendering."""
+    p = get_or_404(db, Project, project_id)
+    if not p.product_id:
+        raise HTTPException(422, "This listing has no product.")
+    return job_out(enqueue(db, "listing_image_plan", {"project_id": p.id, **body.model_dump()}, project_id=p.id))
+
+
+class PlanSlotIn(BaseModel):
+    slot: str
+    purpose: str = Field(default="", max_length=300)
+    concept: str = Field(default="", max_length=600)
+    headline: str = Field(default="", max_length=200)
+    callouts: list[str] = Field(default_factory=list, max_length=8)
+    people: bool = False
+    strategy_source: str = Field(default="benefit", max_length=20)
+    strategy_note: str = Field(default="", max_length=300)
+
+
+class PlanEditIn(BaseModel):
+    slots: list[PlanSlotIn] = Field(min_length=1, max_length=12)
+
+
+@router.put("/listings/{project_id}/plan")
+def edit_plan(project_id: str, body: PlanEditIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.services.image_plan import save_plan_edits
+
+    p = get_or_404(db, Project, project_id)
+    try:
+        save_plan_edits(db, p, [s.model_dump() for s in body.slots])
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return listing_out(db, p)
+
+
+@router.post("/listings/{project_id}/images/{slot}/retry", status_code=202)
+def retry_image(project_id: str, slot: str, body: ImagesIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Render (or re-render) a single planned image of the set."""
+    p = get_or_404(db, Project, project_id)
+    if slot not in SLOT_GUIDE:
+        raise HTTPException(404, f"unknown image slot {slot}")
+    # The slot's stored status is updated by the job itself (under the image-set lock) when it starts.
+    return job_out(enqueue(db, "listing_image_slot", {"project_id": p.id, "slot": slot, "style": body.style,
+                                                      "provider": body.provider}, project_id=p.id))
 
 
 @router.post("/listings/{project_id}/images", status_code=202)

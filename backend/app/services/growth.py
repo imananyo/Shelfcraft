@@ -167,7 +167,7 @@ def ad_concepts(db: Session, product_id: str, *, count: int = 6, personas: list[
     p = db.get(Product, product_id)
     if p is None:
         raise ValueError("product not found")
-    research = db.query(ProductResearch).filter(ProductResearch.product_id == p.id, ProductResearch.kind.notin_(("reviews", "category"))).order_by(ProductResearch.created_at.desc()).first()
+    research = db.query(ProductResearch).filter(ProductResearch.product_id == p.id, ProductResearch.kind.notin_(("reviews", "category", "brief"))).order_by(ProductResearch.created_at.desc()).first()
     known = [x.get("name") for x in ((research.result or {}).get("personas") or [])] if research else []
     personas = [x for x in (personas or known) if x][:4] or ["General shopper"]
     prompt = (f"Brainstorm {count} ad concepts for A/B testing (goal: {goal}). Spread them across these personas: "

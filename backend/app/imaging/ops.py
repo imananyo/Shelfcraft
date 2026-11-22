@@ -216,19 +216,23 @@ def recolor(im: Image.Image, target_hex: str, mask: Image.Image | None = None, s
 
 # ---------------------------------------------------------------- analysis
 def extract_palette(im: Image.Image, k: int = 6) -> list[dict[str, Any]]:
-    from sklearn.cluster import KMeans
-
+    # OpenCV's k-means, not scikit-learn: Windows Smart App Control / Application Control blocks some
+    # scikit-learn binaries (_hierarchical_fast), which broke "Steal the look". OpenCV is already required.
     small = im.convert("RGB").copy()
     small.thumbnail((200, 200))
     px = np.array(small).reshape(-1, 3).astype(np.float32)
     k = min(k, max(1, len(np.unique(px, axis=0))))
-    km = KMeans(n_clusters=k, n_init=4, random_state=0).fit(px)
-    counts = np.bincount(km.labels_, minlength=k)
+    cv2.setRNGSeed(0)  # deterministic palette for the same image
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.5)
+    _, labels, centers = cv2.kmeans(px, k, None, criteria, 4, cv2.KMEANS_PP_CENTERS)
+    counts = np.bincount(labels.ravel(), minlength=k)
     order = np.argsort(-counts)
     total = counts.sum()
     out = []
     for i in order:
-        r, g, b = (int(c) for c in km.cluster_centers_[i])
+        if counts[i] == 0:
+            continue
+        r, g, b = (int(round(c)) for c in centers[i])
         out.append({"hex": f"#{r:02x}{g:02x}{b:02x}", "share": round(float(counts[i] / total), 3)})
     return out
 

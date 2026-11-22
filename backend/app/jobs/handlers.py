@@ -1,6 +1,7 @@
 """Job handlers. Each runs in a worker thread with its own DB session and reports progress."""
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from sqlalchemy import select
@@ -134,10 +135,78 @@ def h_image_generate(ctx: JobContext) -> dict[str, Any]:
         raise PermanentJobError(str(e)) from e
 
 
-@job_handler("listing_images", heavy=True)
+@job_handler("brand_rules_draft")
+def h_brand_rules_draft(ctx: JobContext) -> dict[str, Any]:
+    """AI draft of a brand's claim & visual rules. Returned, not saved: the user reviews and saves it."""
+    from app.services.brand_rules import draft_rules
+
+    p = ctx.payload
+    ctx.progress(0.1, "Drafting brand rules")
+    try:
+        with session_scope() as db:
+            rules, provider, model = draft_rules(db, p["brand_id"], provider=p.get("provider"))
+            return {"brand_id": p["brand_id"], "rules": rules, "provider": provider, "model": model}
+    except (NoProviderAvailable, ValueError) as e:
+        raise PermanentJobError(str(e)) from e
+
+
+@job_handler("listing_image_plan")
+def h_listing_image_plan(ctx: JobContext) -> dict[str, Any]:
+    """Build (or rebuild) the creative brief and the per-slot image plan, without rendering."""
+    from app.services.image_plan import build_plan
+
+    p = ctx.payload
+    try:
+        with session_scope() as db:
+            plan = build_plan(db, p["project_id"], provider=p.get("provider"), rebuild_brief=bool(p.get("rebuild_brief")),
+                              slots=p.get("slots"), progress=ctx.progress)
+            return {"project_id": p["project_id"], "slots": len(plan["slots"]), "brief_id": plan["brief_id"]}
+    except (NoProviderAvailable, ValueError) as e:
+        raise PermanentJobError(str(e)) from e
+
+
+# Slot jobs of one listing can finish close together; serialise their read-modify-write of project.data.
+_PROJECT_DATA_LOCK = threading.Lock()
+
+
+def _slot_order(data: dict[str, Any]) -> list[str]:
+    return [s["slot"] for s in (data.get("image_plan") or {}).get("slots") or []]
+
+
+def _set_slot_state(project_id: str, slot: str, state: dict[str, Any], result: dict[str, Any] | None = None) -> bool:
+    """Record a slot's status (and its new images). Returns True when no slot of the set is still pending."""
+    with _PROJECT_DATA_LOCK, session_scope() as db:
+        proj = db.get(Project, project_id)
+        if proj is None:
+            return False
+        data = dict(proj.data or {})
+        status = {**(data.get("image_status") or {}), slot: state}
+        data["image_status"] = status
+        if result is not None:
+            order = _slot_order(data)
+            images = [i for i in (data.get("images") or []) if i.get("slot") != slot] + [{"slot": slot, **result}]
+            rank = {s: n for n, s in enumerate(order)}
+            images.sort(key=lambda i: rank.get(i.get("slot"), len(rank)))  # plan order; "extra" visuals stay last
+            data["images"] = images
+            first = images[0].get("asset_ids") if images else None
+            if first:
+                proj.thumbnail_asset_id = first[0]
+        data["image_errors"] = [f"{s}: {st.get('error')}" for s, st in status.items() if st.get("status") == "failed"]
+        proj.data = data
+        pending = [s for s, st in status.items() if st.get("status") in ("queued", "running")]
+        if not pending and state.get("status") in ("done", "failed"):
+            done = sum(1 for st in status.values() if st.get("status") == "done")
+            failed = len(data["image_errors"])
+            _notify(db, f"Listing images ready — {proj.name}", f"{done} created, {failed} failed",
+                    link=f"/listings/{proj.id}?tab=images", level="success" if not failed else "warning")
+        return not pending
+
+
+@job_handler("listing_images")
 def h_listing_images(ctx: JobContext) -> dict[str, Any]:
-    """Generate the full marketplace image set for a listing project."""
-    from app.services.creative import SLOT_TO_TYPE, generate_creative
+    """Image set: make sure a brief + plan exist, then queue one render job per slot (each retryable on its own)."""
+    from app.jobs.queue import enqueue
+    from app.services.image_plan import build_plan
     from app.services.marketplaces import MARKETPLACES
 
     p = ctx.payload
@@ -145,44 +214,77 @@ def h_listing_images(ctx: JobContext) -> dict[str, Any]:
         proj = db.get(Project, p["project_id"])
         if proj is None:
             raise PermanentJobError("listing project was deleted")
-        mk = MARKETPLACES.get((proj.data or {}).get("marketplace", "amazon"), MARKETPLACES["amazon"])
-        copy_ = (proj.data or {}).get("copy") or {}
-        strategy = {s.get("slot"): s for s in copy_.get("image_strategy", []) if isinstance(s, dict)}
-        slots = p.get("slots") or mk["image_slots"]
-        product_id, brand_id = proj.product_id, proj.brand_id
-    results: list[dict[str, Any]] = []
-    errors: list[str] = []
-    for i, slot in enumerate(slots):
-        ctx.progress(i / len(slots), f"Creating image {i + 1} of {len(slots)}: {slot}")
-        ctype = SLOT_TO_TYPE.get(slot, "lifestyle")
-        s = strategy.get(slot, {})
-        copy_slot = {**copy_, "headline": s.get("headline") or copy_.get("headline"),
-                     "subheadline": copy_.get("subheadline")}
-        if s.get("callouts"):
-            copy_slot["benefits"] = s["callouts"]
+        planned = set(_slot_order(proj.data or {}))
+        want = p.get("slots") or []
+        default_order = MARKETPLACES.get((proj.data or {}).get("marketplace", "amazon"), MARKETPLACES["amazon"])["image_slots"]
+    if p.get("replan") or not planned or not set(want) <= planned:
+        # Always plan the whole set (so images don't repeat each other's angle), plus any extra slot asked for.
+        order = list(default_order) + [s for s in want if s not in default_order]
         try:
             with session_scope() as db:
-                out = generate_creative(db, product_id=product_id, brand_id=brand_id, creative_type=ctype,
-                                        width=mk["image_size"][0], height=mk["image_size"][1],
-                                        style=p.get("style", "minimal"), extra_prompt=s.get("concept", ""),
-                                        provider=p.get("provider"), copy=copy_slot, project_id=p["project_id"])
-                results.append({"slot": slot, **out})
-        except (ValueError, NoProviderAvailable) as e:
-            errors.append(f"{slot}: {e}")
+                build_plan(db, p["project_id"], provider=p.get("provider"), slots=order,
+                           progress=lambda f, m: ctx.progress(f * 0.9, m))
+        except (NoProviderAvailable, ValueError) as e:
+            raise PermanentJobError(str(e)) from e
+    ctx.progress(0.95, "Queueing one job per image")
+    jobs: dict[str, str] = {}
+    with _PROJECT_DATA_LOCK, session_scope() as db:
+        proj = db.get(Project, p["project_id"])
+        if proj is None:
+            raise PermanentJobError("listing project was deleted")
+        data = dict(proj.data or {})
+        slots = [s for s in _slot_order(data) if not want or s in want]
+        status = dict(data.get("image_status") or {})
+        for slot in slots:
+            j = enqueue(db, "listing_image_slot", {"project_id": proj.id, "slot": slot, "style": p.get("style", "minimal"),
+                                                   "provider": p.get("provider")}, project_id=proj.id)
+            jobs[slot] = j.id
+            status[slot] = {"status": "queued", "job_id": j.id}
+        data["image_status"] = status
+        data["image_errors"] = [f"{s}: {st.get('error')}" for s, st in status.items() if st.get("status") == "failed"]
+        proj.data = data
+    return {"slot_jobs": jobs, "slots": list(jobs)}
+
+
+@job_handler("listing_image_slot", heavy=True)
+def h_listing_image_slot(ctx: JobContext) -> dict[str, Any]:
+    """Render one planned image of a listing's set."""
+    from app.services.creative import SLOT_TO_TYPE, generate_creative
+    from app.services.image_plan import fallback_slot
+    from app.services.marketplaces import MARKETPLACES
+
+    p = ctx.payload
+    slot = p["slot"]
     with session_scope() as db:
         proj = db.get(Project, p["project_id"])
-        if proj:
-            data = dict(proj.data or {})
-            data["images"] = results
-            data["image_errors"] = errors
-            proj.data = data
-            if results and results[0]["asset_ids"]:
-                proj.thumbnail_asset_id = results[0]["asset_ids"][0]
-            _notify(db, f"Listing images ready — {proj.name}", f"{len(results)} created, {len(errors)} failed",
-                    link=f"/listings/{proj.id}?tab=images", level="success" if not errors else "warning")
-    if not results:
-        raise PermanentJobError("; ".join(errors) or "no images produced")
-    return {"created": len(results), "errors": errors}
+        if proj is None:
+            raise PermanentJobError("listing project was deleted")
+        data = proj.data or {}
+        mk = MARKETPLACES.get(data.get("marketplace", "amazon"), MARKETPLACES["amazon"])
+        copy_ = data.get("copy") or {}
+        plan = next((s for s in (data.get("image_plan") or {}).get("slots") or [] if s.get("slot") == slot), None)
+        product_id, brand_id = proj.product_id, proj.brand_id
+    s = plan or fallback_slot(slot, {}, copy_)
+    _set_slot_state(p["project_id"], slot, {"status": "running", "job_id": ctx.job_id})
+    copy_slot = {**copy_, "headline": s.get("headline") or copy_.get("headline"), "subheadline": copy_.get("subheadline")}
+    if s.get("callouts"):
+        copy_slot["benefits"] = s["callouts"]
+    try:
+        with session_scope() as db:
+            out = generate_creative(db, product_id=product_id, brand_id=brand_id, creative_type=SLOT_TO_TYPE.get(slot, "lifestyle"),
+                                    width=mk["image_size"][0], height=mk["image_size"][1], style=p.get("style", "minimal"),
+                                    extra_prompt=s.get("concept") or "", provider=p.get("provider"), copy=copy_slot,
+                                    project_id=p["project_id"], progress=ctx.progress, people=bool(s.get("people")))
+    except (ValueError, NoProviderAvailable) as e:
+        msg = f"{e}. Enable a free image provider or install the local model in Settings." if isinstance(e, NoProviderAvailable) else str(e)
+        _set_slot_state(p["project_id"], slot, {"status": "failed", "job_id": ctx.job_id, "error": msg[:300]})
+        raise PermanentJobError(msg) from e
+    except Exception as e:  # cancelled or crashed: don't leave the slot "running" forever
+        _set_slot_state(p["project_id"], slot, {"status": "failed", "job_id": ctx.job_id, "error": str(e)[:300] or type(e).__name__})
+        raise
+    _set_slot_state(p["project_id"], slot, {"status": "done", "job_id": ctx.job_id},
+                    result={**out, "plan": {k: s.get(k) for k in ("headline", "strategy_source", "strategy_note")}})
+    return {"slot": slot, **out}
 
 
 @job_handler("image_edit", heavy=True)

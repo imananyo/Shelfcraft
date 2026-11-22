@@ -36,6 +36,14 @@ class BrandIn(BaseModel):
     visual_identity: str | None = Field(default=None, max_length=4000)
     marketing_guidelines: str | None = Field(default=None, max_length=8000)
     extra_details: str | None = Field(default=None, max_length=8000)
+    rules: dict[str, Any] | None = None  # see app/services/brand_rules.py; cleaned before saving
+
+    @field_validator("rules")
+    @classmethod
+    def _rules(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        from app.services.brand_rules import clean_rules
+
+        return None if v is None else clean_rules(v)
 
     @field_validator("colors")
     @classmethod
@@ -65,7 +73,7 @@ def brand_out(db: Session, b: Brand) -> dict[str, Any]:
         "tagline": b.tagline, "tone_of_voice": b.tone_of_voice, "target_audience": b.target_audience,
         "positioning": b.positioning, "values": b.values or [], "aesthetic": b.aesthetic or [],
         "visual_identity": b.visual_identity, "marketing_guidelines": b.marketing_guidelines,
-        "extra_details": b.extra_details, "logo_asset_id": b.logo_asset_id,
+        "extra_details": b.extra_details, "logo_asset_id": b.logo_asset_id, "rules": b.rules or {},
         "logo_url": thumb_url(logo) if logo else None,
         "guidelines": [{"id": g.id, "title": g.title, "asset_id": g.asset_id,
                         "chars": len(g.extracted_text or ""), "created_at": g.created_at}
@@ -82,7 +90,7 @@ def list_brands(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
 
 @router.post("", status_code=201)
 def create_brand(body: BrandIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    b = Brand(**body.model_dump())
+    b = Brand(**{**body.model_dump(), "rules": body.rules or {}})
     db.add(b)
     db.flush()
     settings = db.query(UserSettings).first()
@@ -100,9 +108,23 @@ def get_brand(brand_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
 @router.patch("/{brand_id}")
 def update_brand(brand_id: str, body: BrandPatch, db: Session = Depends(get_db)) -> dict[str, Any]:
     b = get_or_404(db, Brand, brand_id)
-    apply_updates(b, body.model_dump(exclude_unset=True))
+    changes = body.model_dump(exclude_unset=True)
+    if changes.get("rules", {}) is None:
+        changes["rules"] = {}
+    apply_updates(b, changes)
     audit(db, "update", "Brand", b.id)
     return brand_out(db, b)
+
+
+@router.post("/{brand_id}/rules/draft", status_code=202)
+def draft_brand_rules(brand_id: str, provider: str | None = None, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Queue an AI draft of the brand's claim & visual rules. The draft is returned in the job result and is
+    only saved when the user saves the brand form."""
+    from app.jobs.queue import enqueue
+    from app.routers.jobs import job_out
+
+    get_or_404(db, Brand, brand_id)
+    return job_out(enqueue(db, "brand_rules_draft", {"brand_id": brand_id, "provider": provider}))
 
 
 @router.delete("/{brand_id}", status_code=204)
@@ -174,8 +196,8 @@ def extract_document_text(asset: Asset) -> str:
     return data.decode("utf-8", errors="replace")[:100_000]
 
 
-def brand_context(db: Session, brand_id: str | None) -> str:
-    """Compact brand description injected into every generation prompt."""
+def brand_context(db: Session, brand_id: str | None, *, include_rules: bool = True) -> str:
+    """Compact brand description injected into every generation prompt (with the brand's claim/visual rules)."""
     if not brand_id:
         return ""
     b = db.get(Brand, brand_id)
@@ -197,4 +219,9 @@ def brand_context(db: Session, brand_id: str | None) -> str:
     guide = " ".join((g.extracted_text or "")[:1500] for g in b.guidelines[:2]).strip()
     if guide:
         parts.append(f"Guideline excerpts: {guide[:2500]}")
+    if include_rules:
+        from app.services.brand_rules import rules_text
+
+        if rt := rules_text(b.rules):
+            parts.append(f"Brand rules:\n{rt}")
     return "\n".join(parts)

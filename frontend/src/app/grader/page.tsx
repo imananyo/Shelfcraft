@@ -1,5 +1,5 @@
 "use client";
-import { CircleAlert, CircleCheck, Gauge, ImagePlus, Sparkles, X } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleMinus, Download, Gauge, ImagePlus, Link2, Pencil, Sparkles, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
@@ -7,7 +7,7 @@ import { AssetPicker, ImageThumb } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Field, Input, ListInput, Select, Switch, Textarea } from "@/components/ui/form";
 import { Badge, Card, Notice, PageHeader, ProviderBadge, Tabs, TabPanel } from "@/components/ui/misc";
-import { post } from "@/lib/api";
+import { ApiError, post } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import type { Asset } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -15,15 +15,22 @@ import { cn } from "@/lib/utils";
 interface Check { label: string; passed: boolean; points: number; max: number; detail: string; fix: string; severity: string; section?: string }
 interface Result {
   score: number; grade: string; sections: { key: string; score: number; checks: Check[] }[]; top_fixes: Check[]; note: string;
+  skipped?: { key: string; reason: string }[];
   ai_review?: { strengths?: string[]; weaknesses?: string[]; unanswered_questions?: string[]; rewrite_suggestions?: { field: string; suggestion: string }[]; provider?: string; model?: string; error?: string };
 }
 const SECTION: Record<string, string> = { title: "Title", bullets: "Bullet points", description: "Description", search_terms: "Search terms", images: "Images", aplus: "A+ content" };
+interface Imported {
+  marketplace: string; id: string; url: string; title: string; bullets: string[]; description: string; brand: string; has_aplus: boolean;
+  assets: Asset[]; images_found: number; price?: number | null; currency?: string | null; rating?: number | null; review_count?: number | null;
+  category?: string | null; skip: Record<string, string>;
+}
+const COUNTRIES = ["US", "UK", "CA", "DE", "FR", "IT", "ES", "IN", "JP", "MX", "AU", "AE", "NL", "SE", "PL", "TR", "BR", "SG", "SA"];
 const tone = (s: number) => (s >= 85 ? "text-success" : s >= 65 ? "text-[color-mix(in_oklch,var(--warning)_75%,black)] dark:text-warning" : "text-danger");
 
 function GraderInner() {
   const sp = useSearchParams();
   const listings = useApi<{ id: string; name: string; marketplace: string; has_copy: boolean }[]>(["listings"], "/listings");
-  const [mode, setMode] = React.useState(sp.get("listing") ? "mine" : "paste");
+  const [mode, setMode] = React.useState(sp.get("listing") ? "mine" : "url");
   const [listingId, setListingId] = React.useState(sp.get("listing") ?? "");
   const [f, setF] = React.useState({ marketplace: "amazon", brand: "", title: "", description: "", search_terms: "", keywords: "" });
   const [bullets, setBullets] = React.useState<string[]>(["", "", "", "", ""]);
@@ -33,22 +40,89 @@ function GraderInner() {
   const [picker, setPicker] = React.useState(false);
   const [res, setRes] = React.useState<Result | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const run = async () => {
+  // Sections an imported public page can't show (search terms; description when A+ replaces it).
+  const [skip, setSkip] = React.useState<Record<string, string>>({});
+  const [url, setUrl] = React.useState("");
+  const [country, setCountry] = React.useState("US");
+  const [source, setSource] = React.useState("");
+  const [blocked, setBlocked] = React.useState(false);
+  const [imported, setImported] = React.useState<Imported | null>(null);
+  const [importing, setImporting] = React.useState(false);
+
+  type Fields = { f: typeof f; bullets: string[]; images: Asset[]; aplus: boolean; skip: Record<string, string> };
+  const gradeWith = async (v: Fields) => {
     setBusy(true);
     try {
+      // A section the user filled in themselves is graded after all.
+      const sk = Object.fromEntries(Object.entries(v.skip).filter(([k]) => !(k === "search_terms" ? v.f.search_terms.trim() : k === "description" ? v.f.description.trim() : "")));
       const body = mode === "mine" ? { listing_id: listingId, ai_review: ai } : {
-        ...f, keywords: f.keywords.split(",").map((s) => s.trim()).filter(Boolean), bullets: bullets.filter((b) => b.trim()),
-        asset_ids: images.map((a) => a.id), has_aplus: aplus, ai_review: ai, brand: f.brand || null,
+        ...v.f, keywords: v.f.keywords.split(",").map((s) => s.trim()).filter(Boolean), bullets: v.bullets.filter((b) => b.trim()),
+        asset_ids: v.images.map((a) => a.id), has_aplus: v.aplus, ai_review: ai, brand: v.f.brand || null, skip: sk,
       };
       setRes(await post<Result>("/grader", body));
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
+  const run = () => gradeWith({ f, bullets, images, aplus, skip });
+
+  const importPage = async (html?: string) => {
+    if (!html && !url.trim()) return toast.error("Paste an Amazon product link or ASIN first.");
+    setImporting(true);
+    try {
+      const r = await post<Imported>("/grader/import", html ? { html } : { url, country });
+      const nf = { ...f, marketplace: r.marketplace, brand: r.brand, title: r.title, description: r.description, search_terms: "" };
+      const nb = r.bullets.length ? r.bullets : [""];
+      setF(nf); setBullets(nb); setImages(r.assets); setAplus(r.has_aplus); setSkip(r.skip); setImported(r); setBlocked(false); setSource("");
+      toast.success(`Imported ${r.id}: ${r.bullets.length} bullets, ${r.assets.length} images`);
+      await gradeWith({ f: nf, bullets: nb, images: r.assets, aplus: r.has_aplus, skip: r.skip });
+    } catch (e) {
+      const d = e instanceof ApiError ? (e.data as { detail?: { blocked?: boolean } } | undefined)?.detail : undefined;
+      if (d?.blocked) setBlocked(true);
+      toast.error((e as Error).message);
+    } finally { setImporting(false); }
+  };
+  const onSavedFile = async (file?: File) => { if (file) await importPage(await file.text()); };
   return (
     <>
       <PageHeader title="Listing grader" description="A transparent score for any listing — yours or one you paste in — with concrete fixes. Rule-based and free; optional AI review." />
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <Card className="p-5">
-          <Tabs value={mode} onValueChange={setMode} tabs={[{ value: "paste", label: "Paste a listing" }, { value: "mine", label: "One of my listings" }]}>
+          <Tabs value={mode === "url" ? "url" : mode} onValueChange={setMode} tabs={[{ value: "url", label: "From an Amazon URL" }, { value: "paste", label: "Paste a listing" }, { value: "mine", label: "One of my listings" }]}>
+            <TabPanel value="url" className="flex flex-col gap-3">
+              <Field label="Amazon product link or ASIN" hint="Any Amazon domain (amazon.com, amazon.in, amazon.co.uk…) or a share link like amzn.in/d/…">
+                <div className="flex gap-2">
+                  <div className="relative flex-1"><Link2 className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+                    <Input className="pl-9" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") importPage(); }}
+                      placeholder="https://www.amazon.com/dp/B0…" aria-label="Amazon product link or ASIN" /></div>
+                  {/^[A-Za-z0-9]{10}$/.test(url.trim()) && <Select value={country} onChange={(e) => setCountry(e.target.value)} className="w-24" aria-label="Marketplace country">{COUNTRIES.map((c) => <option key={c}>{c}</option>)}</Select>}
+                </div>
+              </Field>
+              <Button onClick={() => importPage()} loading={importing} disabled={busy}><Download />Import &amp; grade</Button>
+              <p className="text-xs text-muted">Reads the public product page once: title, bullets, description, brand, every listing photo and whether it has A+ content. Photos are saved to your asset library (tagged “grader”) so the image checks use the real images. No product is created. Search terms aren&apos;t public, so that section isn&apos;t scored.</p>
+              {blocked && (
+                <Notice tone="warning" className="flex flex-col gap-2 text-[12.5px]">
+                  <div><b>Amazon showed a robot check or couldn&apos;t be reached.</b> Open the product page in your own browser, then either save it (Ctrl+S, “Webpage, HTML only”) and choose the file, or open its source (Ctrl+U), select all and paste it here.</div>
+                  <input type="file" accept=".html,.htm,text/html" onChange={(e) => onSavedFile(e.target.files?.[0])} className="text-[12px]" aria-label="Saved product page" />
+                  <Textarea rows={3} value={source} onChange={(e) => setSource(e.target.value)} placeholder="…or paste the page source here" aria-label="Page source" />
+                  <Button size="sm" variant="outline" className="self-start" onClick={() => importPage(source)} disabled={!source.trim() || importing}>Import pasted page</Button>
+                </Notice>
+              )}
+              {imported && (
+                <div className="flex flex-col gap-2 rounded-[12px] border border-border p-3 text-[13px]">
+                  <div className="flex items-center gap-2"><Badge tone="success">Imported</Badge><a href={imported.url} target="_blank" rel="noreferrer" className="truncate text-muted hover:text-foreground">{imported.id}</a>
+                    <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setMode("paste")}><Pencil />Edit fields</Button></div>
+                  <div className="font-medium">{imported.title || "(no title found)"}</div>
+                  <div className="flex flex-wrap gap-1.5 text-[11.5px]">
+                    <Badge>{imported.bullets.length} bullets</Badge><Badge>{imported.description ? `${imported.description.length} char description` : "no description"}</Badge>
+                    <Badge>{imported.assets.length}{imported.images_found > imported.assets.length ? ` of ${imported.images_found}` : ""} images</Badge>
+                    <Badge tone={imported.has_aplus ? "success" : "neutral"}>{imported.has_aplus ? "Has A+ content" : "No A+ content"}</Badge>
+                    {imported.brand && <Badge>Brand: {imported.brand}</Badge>}
+                    {imported.price != null && <Badge>{imported.price} {imported.currency ?? ""}</Badge>}
+                    {imported.rating != null && <Badge>{imported.rating}★{imported.review_count ? ` (${imported.review_count})` : ""}</Badge>}
+                  </div>
+                  {images.length > 0 && <div className="flex flex-wrap gap-1.5">{images.map((a) => <ImageThumb key={a.id} src={a.thumb_url} alt="" className="size-12" />)}</div>}
+                </div>
+              )}
+            </TabPanel>
             <TabPanel value="mine" className="flex flex-col gap-3">
               <Field label="Listing"><Select value={listingId} onChange={(e) => setListingId(e.target.value)}><option value="">Choose…</option>
                 {listings.data?.filter((l) => l.has_copy).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
@@ -79,7 +153,7 @@ function GraderInner() {
           </Tabs>
           <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
             <label className="flex items-center gap-2 text-[13px]"><Switch checked={ai} onChange={setAi} label="AI review" />Add AI review (free/local model)</label>
-            <Button size="lg" onClick={run} loading={busy} disabled={mode === "mine" && !listingId}><Gauge />Grade listing</Button>
+            <Button size="lg" onClick={() => (mode === "url" && !imported ? importPage() : run())} loading={busy} disabled={(mode === "mine" && !listingId) || importing}><Gauge />{mode === "url" && imported ? "Grade again" : "Grade listing"}</Button>
           </div>
         </Card>
         <div className="flex flex-col gap-4">
@@ -92,7 +166,9 @@ function GraderInner() {
             </Card>
             <Card className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3">
               {res.sections.map((s) => <div key={s.key}><div className="text-xs text-muted">{SECTION[s.key]}</div><div className={cn("font-display text-xl font-semibold tabular-nums", tone(s.score))}>{s.score}</div></div>)}
+              {res.skipped?.map((s) => <div key={s.key} title={s.reason}><div className="text-xs text-muted">{SECTION[s.key]}</div><div className="flex items-center gap-1 text-[13px] text-muted"><CircleMinus className="size-3.5" />Not scored</div></div>)}
             </Card>
+            {!!res.skipped?.length && <Notice className="text-xs">{res.skipped.map((s) => <div key={s.key}><b>{SECTION[s.key]}</b> not scored: {s.reason} The score is calculated from the other sections.</div>)}</Notice>}
             {res.top_fixes.length > 0 && (
               <Card className="p-5">
                 <h3 className="mb-2 text-[14px] font-semibold">Top fixes</h3>

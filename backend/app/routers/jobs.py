@@ -20,6 +20,7 @@ JOB_LABELS = {
     "image_edit": "Image edit", "factory_item": "Factory item", "video_render": "Video render",
     "inspire_analyze": "Reference analysis", "inspire_generate": "Reference-guided creative",
     "listing_images": "Listing image set", "aplus_generate": "A+ content",
+    "listing_image_plan": "Image plan", "listing_image_slot": "Listing image", "brand_rules_draft": "Brand rules draft",
 }
 
 

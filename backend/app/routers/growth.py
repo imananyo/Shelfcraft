@@ -34,6 +34,8 @@ class GradeIn(BaseModel):
     asset_ids: list[str] = Field(default_factory=list, max_length=12)
     has_aplus: bool = False
     ai_review: bool = False
+    # Sections that can't be judged, with the reason (e.g. {"search_terms": "not public"}); left out of the score.
+    skip: dict[str, str] = Field(default_factory=dict, max_length=6)
 
 
 def grade_payload(db: Session, body: GradeIn) -> dict[str, Any]:
@@ -59,7 +61,8 @@ def grade_payload(db: Session, body: GradeIn) -> dict[str, Any]:
         a = db.get(Asset, aid)
         if a and a.kind == "image" and not a.deleted_at:
             images.append(load_image(a))
-    result = grade(listing, images, marketplace=marketplace, brand=brand_name, has_aplus=has_aplus)
+    result = grade(listing, images, marketplace=marketplace, brand=brand_name, has_aplus=has_aplus,
+                   skip={k: v[:200] for k, v in body.skip.items()})
     if body.ai_review:
         try:
             result["ai_review"] = ai_critique(listing, marketplace)
@@ -71,6 +74,79 @@ def grade_payload(db: Session, body: GradeIn) -> dict[str, Any]:
 @router.post("/grader")
 def grade_listing(body: GradeIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     return grade_payload(db, body)
+
+
+class GraderImportIn(BaseModel):
+    url: str = Field(default="", max_length=2000)  # Amazon product link, share link (amzn.in/…) or bare ASIN
+    country: str = Field(default="US", max_length=8)  # used only for a bare ASIN
+    html: str = Field(default="", max_length=8_000_000)  # page source saved from the user's browser (blocked fallback)
+
+
+@router.post("/grader/import")
+def grader_import(body: GraderImportIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Read a public Amazon product page (or a page the user saved) into grader fields, without creating a product.
+
+    The listing photos are saved to the asset library (tagged "grader") so the image checks run on the real images.
+    """
+    from urllib.parse import urlparse
+
+    from app.routers.assets import asset_out
+    from app.routers.integrations import (AMAZON_DOMAINS, AMAZON_URL_ASIN, ASIN_RE, IMAGE_CDN_HOSTS,
+                                          amazon_country_from_link, resolve_amazon_short_link)
+    from app.services import marketplace_scrape as ms
+    from app.services.assets import create_asset_from_bytes, sniff
+
+    market = "amazon"
+    try:
+        if body.html.strip():
+            market, ident, url = ms.identify_page(body.html)
+            html = body.html
+        else:
+            value = resolve_amazon_short_link(body.url.strip())
+            if ASIN_RE.match(value.upper()):
+                ident = value.upper()
+                country = body.country.upper() if body.country.upper() in AMAZON_DOMAINS else "US"
+            else:
+                host = (urlparse(value if "://" in value else "https://" + value).hostname or "").lower()
+                m = AMAZON_URL_ASIN.search(value)
+                if "amazon." not in host and "amzn." not in host:
+                    raise HTTPException(422, "Paste an Amazon product link (amazon.com, amazon.in, amzn.in/…) or an ASIN.")
+                if not m:
+                    raise HTTPException(422, "Couldn't find the product's ASIN in that link — open the product page and copy its address.")
+                ident, country = m.group(1).upper(), amazon_country_from_link(value) or "US"
+            url = f"https://www.{AMAZON_DOMAINS.get(country, 'amazon.com')}/dp/{ident}"
+            html = ms.fetch_page(url)
+        data = (ms.parse_amazon if market == "amazon" else ms.parse_walmart)(html)
+    except ms.ScrapeError as e:
+        msg = str(e)
+        raise HTTPException(422, {"message": msg[:1].upper() + msg[1:] + ".", "blocked": not body.html.strip()}) from e
+    has_aplus = ms.detect_aplus(html) if market == "amazon" else False
+    assets = []
+    for i, img in enumerate(data.get("images") or []):
+        host = (urlparse(img).hostname or "").lower()
+        if not img.startswith("https://") or not any(host == h or host.endswith("." + h) for h in IMAGE_CDN_HOSTS):
+            continue
+        raw = ms.download_image(img)
+        if not raw:
+            continue
+        try:
+            kind, ext, _ = sniff(raw[:64], "img.jpg")
+            if kind != "image":
+                continue
+            a = create_asset_from_bytes(db, raw, ext=ext, source="upload", area="uploads", filename=f"{ident}-{i + 1}.{ext}",
+                                        title=f"{ident} listing image {i + 1}", tags=["grader", market, ident])
+        except ValueError:
+            continue
+        assets.append(asset_out(a))
+    skip = {"search_terms": "Backend search terms aren't shown on the public product page."}
+    if not data.get("description") and has_aplus:
+        skip["description"] = "The page shows A+ content in place of the product description."
+    return {"marketplace": market, "id": ident, "url": url, "title": data.get("name") or "",
+            "bullets": data.get("features") or [], "description": data.get("description") or "",
+            "brand": data.get("brand") or "", "has_aplus": has_aplus, "assets": assets,
+            "images_found": len(data.get("images") or []), "price": data.get("price"), "currency": data.get("currency"),
+            "rating": data.get("rating"), "review_count": data.get("review_count"), "category": data.get("category"),
+            "skip": skip}
 
 
 # ---------------------------------------------------------------- Translate

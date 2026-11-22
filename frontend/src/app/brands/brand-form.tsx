@@ -1,29 +1,33 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileText, Globe, Info, Trash2 } from "lucide-react";
+import { FileText, Globe, Info, Sparkles, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dropzone } from "@/components/ui/dropzone";
 import { ChipsInput, ColorSwatches, Field, Input, Select, Textarea } from "@/components/ui/form";
-import { Card, Notice } from "@/components/ui/misc";
+import { JobCard } from "@/components/shared";
+import { Badge, Card, Notice } from "@/components/ui/misc";
 import { Confirm } from "@/components/ui/overlay";
 import { del, patch, post, upload } from "@/lib/api";
-import type { Brand } from "@/lib/types";
+import type { Brand, BrandRules, Job } from "@/lib/types";
 
 const FONTS = ["Inter", "Geist", "Manrope", "DM Sans", "Plus Jakarta Sans", "Outfit", "Poppins", "Montserrat", "Lato", "Nunito Sans",
   "Bricolage Grotesque", "Space Grotesk", "Sora", "Playfair Display", "DM Serif Display", "Fraunces", "Libre Baskerville", "Cormorant Garamond", "Archivo", "Work Sans"];
 const LANGS = [["en", "English"], ["es", "Spanish"], ["de", "German"], ["fr", "French"], ["it", "Italian"], ["pt", "Portuguese"], ["nl", "Dutch"], ["ja", "Japanese"], ["hi", "Hindi"], ["ar", "Arabic"]];
 
-type Form = Omit<Brand, "id" | "guidelines" | "product_count" | "created_at" | "updated_at" | "logo_url" | "logo_asset_id">;
+type Form = Omit<Brand, "id" | "guidelines" | "product_count" | "created_at" | "updated_at" | "logo_url" | "logo_asset_id" | "rules"> & { rules: BrandRules };
+export const EMPTY_RULES: BrandRules = { safe_claims: [], careful_claims: [], banned_words: [], props_allowed: [], props_banned: [], backgrounds: [],
+  fixed_elements: [], variable_elements: [], photo_look: "", layout_notes: "", main_image_rules: "", headline_max_words: 7, callouts_max: 4 };
 const EMPTY: Form = { name: "", website: "", colors: [], primary_font: "", secondary_font: "", language: "en", tagline: "", tone_of_voice: "",
-  target_audience: "", positioning: "", values: [], aesthetic: [], visual_identity: "", marketing_guidelines: "", extra_details: "" };
+  target_audience: "", positioning: "", values: [], aesthetic: [], visual_identity: "", marketing_guidelines: "", extra_details: "", rules: EMPTY_RULES };
 
 export function BrandForm({ brand }: { brand?: Brand }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const [f, setF] = React.useState<Form>(() => (brand ? { ...EMPTY, ...Object.fromEntries(Object.entries(brand).map(([k, v]) => [k, v ?? (EMPTY as Record<string, unknown>)[k]])) } as Form : EMPTY));
+  const [f, setF] = React.useState<Form>(() => (brand ? { ...EMPTY, ...Object.fromEntries(Object.entries(brand).map(([k, v]) => [k, v ?? (EMPTY as Record<string, unknown>)[k]])),
+    rules: { ...EMPTY_RULES, ...(brand.rules ?? {}) } } as Form : EMPTY));
   const [saving, setSaving] = React.useState(false);
   const [url, setUrl] = React.useState(brand?.website ?? "");
   const [scraping, setScraping] = React.useState(false);
@@ -115,6 +119,8 @@ export function BrandForm({ brand }: { brand?: Brand }) {
           <Field label="Marketing guidelines" hint="Do's and don'ts the AI must follow (claims to avoid, words you never use…)."><Textarea rows={4} value={f.marketing_guidelines ?? ""} onChange={(e) => set("marketing_guidelines", e.target.value)} /></Field>
           <Field label="Extra details"><Textarea value={f.extra_details ?? ""} onChange={(e) => set("extra_details", e.target.value)} placeholder="Any additional brand guidelines or context" /></Field>
         </Card>
+
+        <RulesCard brandId={brand?.id} rules={f.rules} onChange={(r) => set("rules", r)} />
       </div>
 
       <div className="flex flex-col gap-4 lg:sticky lg:top-0 lg:self-start">
@@ -153,5 +159,53 @@ export function BrandForm({ brand }: { brand?: Brand }) {
           onConfirm={async () => { await del(`/brands/${brand.id}`); refresh(); toast.success("Brand deleted"); router.push("/brands"); }} />
       )}
     </div>
+  );
+}
+
+const RULE_LISTS: [keyof BrandRules, string, string][] = [
+  ["safe_claims", "Claims you can make", "e.g. Keeps drinks cold for 24 hours"],
+  ["careful_claims", "Claims that need careful wording", "e.g. eco-friendly → say what exactly"],
+  ["banned_words", "Never use these words or claims", "e.g. guaranteed, #1, cure"],
+  ["props_allowed", "Allowed props", "e.g. backpack, rocks"],
+  ["props_banned", "Banned props", "e.g. alcohol, competitor products"],
+  ["backgrounds", "Backgrounds", "e.g. mountain trail at sunrise"],
+  ["fixed_elements", "Keep the same in every image", "e.g. logo bottom-left"],
+  ["variable_elements", "May vary between images", "e.g. scene, season"],
+];
+
+/** Structured rules the image planner and copy prompts follow. Drafted by AI on request, always saved by the user. */
+function RulesCard({ brandId, rules, onChange }: { brandId?: string; rules: BrandRules; onChange: (r: BrandRules) => void }) {
+  const [jobId, setJobId] = React.useState<string | null>(null);
+  const upd = <K extends keyof BrandRules>(k: K, v: BrandRules[K]) => onChange({ ...rules, [k]: v });
+  const draft = async () => {
+    if (!brandId) return toast.message("Save the brand first, then draft its rules.");
+    try { const j = await post<Job>(`/brands/${brandId}/rules/draft`); setJobId(j.id); } catch (e) { toast.error((e as Error).message); }
+  };
+  return (
+    <Card className="flex flex-col gap-5 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-[15px] font-semibold">Brand rules for images & claims</h2>
+        {rules.ai_drafted && <Badge tone="ai">AI draft — review before saving</Badge>}
+        <Button variant="ai" size="sm" className="ml-auto" onClick={draft} disabled={!!jobId || !brandId}><Sparkles />Draft with AI</Button>
+      </div>
+      <p className="-mt-3 text-[12.5px] text-muted">The image planner follows these for every listing image, and copy generation respects the claim rules. Headlines or callouts that use a banned word are flagged.</p>
+      {jobId && <JobCard jobId={jobId} compact title="Drafting brand rules" onDone={(j) => {
+        setJobId(null);
+        const r = j.result?.rules as BrandRules | undefined;
+        if (j.status === "succeeded" && r) { onChange({ ...EMPTY_RULES, ...r }); toast.success("Draft filled in — review it, then save the brand."); }
+      }} />}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {RULE_LISTS.map(([k, label, ph]) => (
+          <Field key={k} label={label} aside="Enter to add"><ChipsInput value={rules[k] as string[]} onChange={(v) => upd(k, v as never)} max={12} placeholder={ph} /></Field>
+        ))}
+      </div>
+      <Field label="Photo look" hint="Lighting, contrast, colour temperature, mood."><Textarea rows={2} value={rules.photo_look} onChange={(e) => upd("photo_look", e.target.value)} placeholder="Warm natural light, soft shadows, slightly desaturated" /></Field>
+      <Field label="Layout notes"><Textarea rows={2} value={rules.layout_notes} onChange={(e) => upd("layout_notes", e.target.value)} placeholder="Headline top-left, product right of centre, lots of space" /></Field>
+      <Field label="Main image rules"><Textarea rows={2} value={rules.main_image_rules} onChange={(e) => upd("main_image_rules", e.target.value)} placeholder="Pure white, product fills ~85% of the frame, no props or text" /></Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Max words per image headline"><Input type="number" min={2} max={12} value={rules.headline_max_words} onChange={(e) => upd("headline_max_words", Number(e.target.value) || 7)} /></Field>
+        <Field label="Max callouts per image"><Input type="number" min={0} max={6} value={rules.callouts_max} onChange={(e) => upd("callouts_max", Number(e.target.value))} /></Field>
+      </div>
+    </Card>
   );
 }

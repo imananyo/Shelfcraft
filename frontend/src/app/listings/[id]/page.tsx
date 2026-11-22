@@ -1,6 +1,6 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, Gauge, History, Images, Info, Languages, Layers, LayoutTemplate, RefreshCw, Save, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { ClipboardList, Copy, Download, Gauge, History, Images, Info, Languages, Layers, LayoutTemplate, RefreshCw, RotateCcw, Save, Sparkles, Trash2, TriangleAlert, Users } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -13,7 +13,7 @@ import { Badge, Card, EmptyState, ErrorState, Notice, PageHeader, ProviderBadge,
 import { Confirm, Menu, MenuItem, Popover } from "@/components/ui/overlay";
 import { del, download, get, post, put } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
-import type { Asset, Job, ListingCopy } from "@/lib/types";
+import type { Asset, CreativeBrief, ImagePlan, Job, ListingCopy, PlanSlot, SlotStatus, StrategySource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface Listing {
@@ -21,7 +21,12 @@ interface Listing {
   copy: ListingCopy | null; warnings: { field: string; message: string }[]; provenance?: { provider?: string; model?: string; edited_by_user?: boolean } | null;
   versions: number; images: { slot: string; asset_id: string; document_id?: string }[]; image_errors: string[];
   limits: Record<string, { max_chars?: number; max_bytes?: number; count?: number; note?: string }>; jobs: Job[];
+  image_plan?: ImagePlan | null; image_status?: Record<string, SlotStatus>; brief?: CreativeBrief | null;
 }
+
+const SOURCE_LABEL: Record<StrategySource, string> = { hook: "Hook", pain_point: "Pain point", usp: "USP", benefit: "Benefit",
+  persona: "Persona", review: "Customer reviews", spec: "Specs" };
+const isPending = (st?: SlotStatus) => st?.status === "queued" || st?.status === "running";
 
 const SLOT_LABEL: Record<string, string> = { main_white: "Main image", lifestyle: "Lifestyle", lifestyle_2: "Lifestyle 2", infographic_features: "Feature callouts",
   infographic_benefits: "Benefit headline", comparison: "Comparison", dimensions: "Dimensions", detail: "Detail" };
@@ -57,13 +62,16 @@ function ListingInner() {
   const sp = useSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
-  const q = useApi<Listing>(["listing", id], `/listings/${id}`);
+  // Poll while any image of the set is still queued or rendering (each image is its own job).
+  const q = useApi<Listing>(["listing", id], `/listings/${id}`, {
+    refetchInterval: (d) => (d && Object.values(d.image_status ?? {}).some(isPending) ? 3000 : false) });
   const [tab, setTab] = React.useState(sp.get("tab") ?? "copy");
   const [copy, setCopy] = React.useState<ListingCopy | null>(null);
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [jobId, setJobId] = React.useState<string | null>(null);
   const [imgJob, setImgJob] = React.useState<string | null>(null);
+  const [planJob, setPlanJob] = React.useState<string | null>(null);
   const [style, setStyle] = React.useState("minimal");
   const [confirmDel, setConfirmDel] = React.useState(false);
   const L = q.data;
@@ -79,10 +87,12 @@ function ListingInner() {
     const active = L.jobs.filter((j) => (j.status === "queued" || j.status === "running") && !finished.current.has(j.id));
     const copyJob = active.find((j) => j.type === "listing_copy");
     const imageJob = active.find((j) => j.type === "listing_images");
+    const planningJob = active.find((j) => j.type === "listing_image_plan");
     if (copyJob && !jobId) setJobId(copyJob.id);
     if (imageJob && !imgJob) setImgJob(imageJob.id);
+    if (planningJob && !planJob) setPlanJob(planningJob.id);
     if (!dirty) setCopy(L.copy ? safeCopy(L.copy) : { title: "", bullets: ["", "", "", "", ""], description: "", keywords: [], search_terms: "" });
-  }, [L, dirty, jobId, imgJob]);
+  }, [L, dirty, jobId, imgJob, planJob]);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["listing", id] });
   const set = (k: keyof ListingCopy, v: unknown) => { setCopy((c) => ({ ...(c ?? {}), [k]: v })); setDirty(true); };
@@ -98,9 +108,14 @@ function ListingInner() {
     try { const j = await post<Job>(`/listings/${id}/generate`, { field: field ?? null, instruction: instruction || null }); setJobId(j.id); }
     catch (e) { toast.error((e as Error).message); }
   };
-  const genImages = async () => {
+  const genImages = async (replan = false) => {
     if (dirty) await save();
-    try { const j = await post<Job>(`/listings/${id}/images`, { style }); setImgJob(j.id); setTab("images"); }
+    try { const j = await post<Job>(`/listings/${id}/images`, { style, replan }); setImgJob(j.id); setTab("images"); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  const planImages = async (rebuildBrief = false) => {
+    if (dirty) await save();
+    try { const j = await post<Job>(`/listings/${id}/plan`, { rebuild_brief: rebuildBrief }); setPlanJob(j.id); }
     catch (e) { toast.error((e as Error).message); }
   };
   const copyAll = async () => {
@@ -180,12 +195,29 @@ function ListingInner() {
         </TabPanel>
         <TabPanel value="strategy">
           <div className="grid gap-4 md:grid-cols-2">
+            <BriefCard brief={L.brief} busy={!!planJob} onRebuild={() => planImages(true)} />
             <Card className="p-5"><h3 className="mb-2 text-[14px] font-semibold">Benefits</h3><ul className="list-disc space-y-1 pl-4 text-[13px]">{(copy.benefits ?? []).map((b) => <li key={b}>{b}</li>)}</ul></Card>
             <Card className="p-5"><h3 className="mb-2 text-[14px] font-semibold">Feature explanations</h3>{(copy.feature_explanations ?? []).map((f) => <div key={f.feature} className="mb-2 text-[13px]"><b>{f.feature}</b> — <span className="text-muted">{f.explanation}</span></div>)}</Card>
             <Card className="p-5"><h3 className="mb-2 text-[14px] font-semibold">Listing structure</h3><ol className="list-decimal space-y-1 pl-4 text-[13px]">{(copy.listing_structure ?? []).map((b) => <li key={b}>{b}</li>)}</ol></Card>
             <Card className="p-5"><h3 className="mb-2 text-[14px] font-semibold">Creative recommendations</h3><ul className="list-disc space-y-1 pl-4 text-[13px]">{(copy.creative_recommendations ?? []).map((b) => <li key={b}>{b}</li>)}</ul></Card>
+            {L.image_plan?.slots.length ? (
+              <Card className="p-5 md:col-span-2">
+                <div className="mb-3 flex items-center justify-between"><h3 className="text-[14px] font-semibold">Image plan</h3>
+                  <Button size="sm" variant="outline" onClick={() => setTab("images")}>Edit in Image set</Button></div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {L.image_plan.slots.map((s) => (
+                    <div key={s.slot} className="rounded-[12px] border border-border p-3 text-[13px]">
+                      <div className="mb-1.5 flex flex-wrap gap-1"><Badge tone="primary">{SLOT_LABEL[s.slot] ?? s.slot}</Badge><Badge tone="ai">{SOURCE_LABEL[s.strategy_source] ?? s.strategy_source}</Badge></div>
+                      {s.headline && <div className="font-medium">{s.headline}</div>}
+                      <div className="text-muted">{s.strategy_note || s.purpose}</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ) : null}
             <Card className="p-5 md:col-span-2">
-              <div className="mb-3 flex items-center justify-between"><h3 className="text-[14px] font-semibold">Image strategy</h3><Regen onRegen={(i) => regen("image_strategy", i)} disabled={generating} /></div>
+              <div className="mb-3 flex items-center justify-between"><h3 className="text-[14px] font-semibold">Image ideas from the copy</h3><Regen onRegen={(i) => regen("image_strategy", i)} disabled={generating} /></div>
+              <p className="-mt-1 mb-3 text-[12px] text-muted">Written with the listing copy. The image plan uses these only for slots the AI couldn&apos;t plan.</p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {(copy.image_strategy ?? []).map((s) => (
                   <div key={s.slot + s.concept} className="rounded-[12px] border border-border p-3 text-[13px]">
@@ -198,7 +230,8 @@ function ListingInner() {
             </Card>
           </div>
         </TabPanel>
-        <TabPanel value="images"><ImageSet listing={L} style={style} setStyle={setStyle} onGenerate={genImages} jobId={imgJob} onDone={() => { finish(imgJob); setImgJob(null); refresh(); }} /></TabPanel>
+        <TabPanel value="images"><ImageSet listing={L} style={style} setStyle={setStyle} onGenerate={genImages} jobId={imgJob} onDone={() => { finish(imgJob); setImgJob(null); refresh(); }}
+          onPlan={() => planImages(false)} planJob={planJob} onPlanDone={() => { finish(planJob); setPlanJob(null); refresh(); }} onRefresh={refresh} /></TabPanel>
       </Tabs>
       <Confirm open={confirmDel} onOpenChange={setConfirmDel} title="Delete this listing?" body="Generated images stay in your asset library."
         onConfirm={async () => { await del(`/listings/${id}`); qc.invalidateQueries({ queryKey: ["listings"] }); router.push("/listings"); }} />
@@ -259,11 +292,51 @@ function Versions({ id, count, onRestore }: { id: string; count: number; onResto
   );
 }
 
-function ImageSet({ listing, style, setStyle, onGenerate, jobId, onDone }: { listing: Listing; style: string; setStyle: (s: string) => void; onGenerate: () => void; jobId: string | null; onDone: () => void }) {
+function BriefCard({ brief, busy, onRebuild }: { brief?: CreativeBrief | null; busy: boolean; onRebuild: () => void }) {
+  return (
+    <Card className="p-5 md:col-span-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <ClipboardList className="size-4 text-muted" /><h3 className="text-[14px] font-semibold">Creative brief</h3>
+        {brief && (brief.ai_pass ? <ProviderBadge provider={brief.provider} model={brief.model} ai /> : <Badge>Assembled from stored analysis (no AI)</Badge>)}
+        {brief?.stale && <Badge tone="warning">Out of date — research or product changed</Badge>}
+        <Button size="sm" variant="outline" className="ml-auto" onClick={onRebuild} disabled={busy}><RefreshCw />{brief ? "Rebuild brief & plan" : "Build brief & plan"}</Button>
+      </div>
+      {!brief ? <p className="text-[13px] text-muted">The brief combines product facts, Deep Strategy, review themes and the category benchmark. It&apos;s built the first time you plan or generate images, then reused until one of those changes.</p> : (
+        <div className="grid gap-4 text-[13px] md:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            {brief.hook && <div><span className="text-muted">Hook: </span><b>{brief.hook}</b></div>}
+            {brief.creative_concept && <div><span className="text-muted">Concept: </span>{brief.creative_concept}</div>}
+            {brief.target && <div><span className="text-muted">Speaks to: </span>{brief.target}</div>}
+            {!!brief.reviews?.love?.length && <div><span className="text-muted">Customers love: </span>{brief.reviews.love.join(", ")}</div>}
+            {!!brief.reviews?.hate?.length && <div><span className="text-muted">Complaints: </span>{brief.reviews.hate.join(", ")}</div>}
+            <div className="flex flex-wrap gap-1 pt-1 text-[11px]">
+              {[["Deep Strategy", brief.sources?.strategy_id], ["Reviews", brief.sources?.reviews_id], ["Category", brief.sources?.category_id]].map(([l, v]) =>
+                <Badge key={l as string} tone={v ? "success" : "neutral"}>{l}: {v ? "used" : "not run"}</Badge>)}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="text-[12px] font-medium text-muted">Customer needs</div>
+            {(brief.customer_needs ?? []).map((n, i) => (
+              <div key={i} className="rounded-[10px] border border-border p-2"><b>{n.feature}</b>{n.functional_benefit && <> → {n.functional_benefit}</>}{n.emotional_benefit && <> → <i>{n.emotional_benefit}</i></>}
+                {n.problem_solved && <div className="text-[12px] text-muted">Solves: {n.problem_solved}</div>}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ImageSet({ listing, style, setStyle, onGenerate, jobId, onDone, onPlan, planJob, onPlanDone, onRefresh }: {
+  listing: Listing; style: string; setStyle: (s: string) => void; onGenerate: (replan?: boolean) => void; jobId: string | null; onDone: () => void;
+  onPlan: () => void; planJob: string | null; onPlanDone: () => void; onRefresh: () => void;
+}) {
   const [moreJobs, setMoreJobs] = React.useState<string[]>([]);
   const [prompt, setPrompt] = React.useState("");
   const [ctype, setCtype] = React.useState("lifestyle");
   const [busy, setBusy] = React.useState(false);
+  const plan = listing.image_plan;
+  const pending = Object.values(listing.image_status ?? {}).some(isPending);
   const addMore = async () => {
     setBusy(true);
     try {
@@ -275,14 +348,17 @@ function ImageSet({ listing, style, setStyle, onGenerate, jobId, onDone }: { lis
     <div className="flex flex-col gap-5">
       <Card className="flex flex-wrap items-end gap-3 p-4">
         <Field label="Visual style" className="w-48"><Select value={style} onChange={(e) => setStyle(e.target.value)}>{["minimal", "natural", "luxury", "vibrant", "editorial", "tech"].map((s) => <option key={s} className="capitalize">{s}</option>)}</Select></Field>
-        <div className="flex-1 text-[12.5px] text-muted">Creates the full marketplace set: main image on white, lifestyle, feature & benefit infographics, comparison, dimensions and detail. Every image is saved as an editable layered design. On this CPU expect roughly 30–60 s per AI background.</div>
-        <Button variant="ai" onClick={onGenerate} disabled={!!jobId}><Images />{listing.images.length ? "Regenerate image set" : "Generate image set"}</Button>
+        <div className="flex-1 text-[12.5px] text-muted">First a plan is written from the creative brief and your brand rules: one image at a time, each tied to a point from the strategy. Review or edit it, then render. Each image renders as its own job and can be retried on its own. With the local AI expect ~1 min per planned image and 30–60 s per AI background.</div>
+        <Button variant="outline" onClick={onPlan} disabled={!!planJob || !!jobId || pending}><ClipboardList />{plan ? "Re-plan images" : "Plan images"}</Button>
+        <Button variant="ai" onClick={() => onGenerate(false)} disabled={!!jobId || !!planJob || pending}><Images />{listing.images.length ? "Regenerate image set" : plan ? "Render image set" : "Plan & generate image set"}</Button>
       </Card>
-      {jobId && <JobCard jobId={jobId} title="Building image set" onDone={onDone} />}
+      {planJob && <JobCard jobId={planJob} title="Writing the creative brief and image plan" onDone={onPlanDone} />}
+      {jobId && <JobCard jobId={jobId} title="Preparing the image set" onDone={onDone} />}
       {moreJobs.map((j) => <JobCard key={j} jobId={j} compact title="Adding a visual" onDone={() => { setMoreJobs((x) => x.filter((y) => y !== j)); onDone(); }} />)}
-      {listing.image_errors.length > 0 && <Notice tone="warning">Some images couldn&apos;t be created: {listing.image_errors.join("; ")}</Notice>}
-      {listing.images.length === 0 && !jobId ? <EmptyState icon={<Images />} title="No images yet" body="Generate the set above. The copy's image strategy is used for headlines and callouts." />
-        : <ListingImages listingId={listing.id} name={listing.name} ids={listing.images} onChange={onDone} />}
+      {plan?.slots.length ? <PlanEditor listing={listing} style={style} onChange={onRefresh} locked={!!planJob || !!jobId} />
+        : !planJob && <EmptyState icon={<ClipboardList />} title="No image plan yet" body="Plan images to see what each image will show and why, before anything is rendered. Generating the set plans first automatically." />}
+      {listing.image_errors.length > 0 && <Notice tone="warning">Some images couldn&apos;t be created: {listing.image_errors.join("; ")}. Use Retry on that image in the plan above.</Notice>}
+      {listing.images.length > 0 && <ListingImages listingId={listing.id} name={listing.name} ids={listing.images} onChange={onDone} />}
       {listing.images.length > 0 && (
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[14px] font-semibold">Add more visuals</div>
@@ -296,6 +372,83 @@ function ImageSet({ listing, style, setStyle, onGenerate, jobId, onDone }: { lis
         </Card>
       )}
     </div>
+  );
+}
+
+function PlanEditor({ listing, style, onChange, locked }: { listing: Listing; style: string; onChange: () => void; locked: boolean }) {
+  // Unsaved edits; null = show the saved plan (so a re-plan or refetch shows up without syncing state in an effect).
+  const [edits, setEdits] = React.useState<PlanSlot[] | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [queued, setQueued] = React.useState<Record<string, string>>({});
+  const slots = edits ?? listing.image_plan?.slots ?? [];
+  const dirty = edits !== null;
+  // A retry counts as in flight until the slot's recorded job is that retry and has finished.
+  const retrying = Object.fromEntries(Object.entries(queued).filter(([slot, jid]) => {
+    const st = listing.image_status?.[slot];
+    return !(st?.job_id === jid && !isPending(st));
+  }));
+  const upd = (i: number, patch: Partial<PlanSlot>) => setEdits(slots.map((s, n) => (n === i ? { ...s, ...patch } : s)));
+  const save = async () => {
+    setSaving(true);
+    try { await put(`/listings/${listing.id}/plan`, { slots }); setEdits(null); onChange(); toast.success("Image plan saved"); }
+    catch (e) { toast.error((e as Error).message); } finally { setSaving(false); }
+  };
+  const retry = async (slot: string) => {
+    if (dirty) await save();
+    try { const j = await post<Job>(`/listings/${listing.id}/images/${slot}/retry`, { style }); setQueued((r) => ({ ...r, [slot]: j.id })); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  const plan = listing.image_plan!;
+  return (
+    <Card className="flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-[14px] font-semibold">Image plan</h3>
+        {plan.edited_by_user && <Badge>Edited by you</Badge>}
+        {plan.brand_rules ? <Badge tone="success">Brand rules applied</Badge> : <Badge>No brand rules yet — add them on the brand page</Badge>}
+        <Button size="sm" className="ml-auto" onClick={save} loading={saving} disabled={!dirty || locked}><Save />Save plan</Button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {slots.map((s, i) => {
+          const live = listing.image_status?.[s.slot];
+          // A just-queued retry shows "Queued" until the job itself records the slot's status.
+          const st: SlotStatus | undefined = retrying[s.slot] && live?.job_id !== retrying[s.slot] ? { status: "queued" } : live;
+          const hasText = s.slot !== "main_white";
+          return (
+            <div key={s.slot} className="flex flex-col gap-2 rounded-[12px] border border-border p-3 text-[13px]">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tone="primary">{SLOT_LABEL[s.slot] ?? s.slot}</Badge>
+                <Badge tone={s.source === "ai" ? "ai" : "neutral"}>{s.source === "ai" ? "AI plan" : s.source === "user" ? "Your edit" : s.source === "auto" ? "Automatic" : "Fallback (no AI)"}</Badge>
+                {s.people && <Badge><Users />People</Badge>}
+                <span className="ml-auto">
+                  {st?.status === "done" && <Badge tone="success">Rendered</Badge>}
+                  {st?.status === "queued" && <Badge>Queued</Badge>}
+                  {st?.status === "running" && <Badge tone="ai">Rendering {Math.round((st.progress ?? 0) * 100)}%</Badge>}
+                  {st?.status === "failed" && <Badge tone="danger">Failed</Badge>}
+                </span>
+              </div>
+              <div className="text-[12px] text-muted">{s.purpose}</div>
+              {hasText && <Input value={s.headline} onChange={(e) => upd(i, { headline: e.target.value })} placeholder="Headline on the image" aria-label={`${s.slot} headline`} disabled={locked} />}
+              {hasText && <Input value={s.callouts.join(", ")} onChange={(e) => upd(i, { callouts: e.target.value.split(",").map((c) => c.trimStart()) })}
+                onBlur={() => upd(i, { callouts: s.callouts.map((c) => c.trim()).filter(Boolean) })} placeholder="Callouts, comma-separated" aria-label={`${s.slot} callouts`} disabled={locked} />}
+              <Textarea rows={2} value={s.concept} onChange={(e) => upd(i, { concept: e.target.value })} placeholder="Scene / background for the image model" aria-label={`${s.slot} scene`} disabled={locked} />
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={s.strategy_source} onChange={(e) => upd(i, { strategy_source: e.target.value as StrategySource })} className="w-36" aria-label="Strategy point" disabled={locked}>
+                  {Object.entries(SOURCE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </Select>
+                {hasText && s.slot !== "dimensions" && s.slot !== "detail" && <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={s.people} onChange={(e) => upd(i, { people: e.target.checked })} disabled={locked} />Person in scene</label>}
+              </div>
+              <Input value={s.strategy_note} onChange={(e) => upd(i, { strategy_note: e.target.value })} placeholder="Which point of the brief this image proves" aria-label={`${s.slot} strategy note`} disabled={locked} />
+              {s.flags.map((f) => <Notice key={f} tone="warning" icon={<TriangleAlert />} className="text-xs">{f}</Notice>)}
+              {st?.status === "failed" && st.error && <div className="text-[12px] text-danger">{st.error}</div>}
+              {retrying[s.slot] && <JobCard jobId={retrying[s.slot]} compact title={`Rendering ${SLOT_LABEL[s.slot] ?? s.slot}`} onDone={onChange} />}
+              {!retrying[s.slot] && !isPending(st) && (
+                <Button size="sm" variant="ghost" className="self-start" onClick={() => retry(s.slot)} disabled={locked}><RotateCcw />{st?.status === "failed" ? "Retry this image" : st?.status === "done" ? "Re-render this image" : "Render this image"}</Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 

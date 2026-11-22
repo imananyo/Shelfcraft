@@ -110,7 +110,7 @@ def generate_creative(db: Session, *, product_id: str | None, brand_id: str | No
                       width: int, height: int, style: str = "minimal", prompt_override: str | None = None,
                       extra_prompt: str = "", provider: str | None = None, seed: int | None = None,
                       harmonize: bool = False, copy: dict[str, Any] | None = None, project_id: str | None = None,
-                      template_id: str | None = None, progress: Any = None) -> dict[str, Any]:
+                      template_id: str | None = None, progress: Any = None, people: bool = False) -> dict[str, Any]:
     spec = CREATIVE_TYPES.get(creative_type)
     if spec is None:
         raise ValueError(f"unknown creative type {creative_type}")
@@ -148,7 +148,7 @@ def generate_creative(db: Session, *, product_id: str | None, brand_id: str | No
     # ---- composite: AI background + untouched product
     if spec["mode"] == "composite":
         prompt = prompt_override or creative_prompt(product, brand, creative_type, style, extra_prompt,
-                                                    background_only=cutout is not None)
+                                                    background_only=cutout is not None, people=people)
         tick(0.3, "Generating background")
         if cutout is None:
             # No photo: full text-to-image. The product's look is invented → flagged clearly.
@@ -217,7 +217,8 @@ def generate_creative(db: Session, *, product_id: str | None, brand_id: str | No
     if needs_bg:
         tick(0.35, "Generating background")
         bw, bh = base["width"], base["height"]
-        prompt = prompt_override or creative_prompt(product, brand, "lifestyle", style, extra_prompt, background_only=True)
+        prompt = prompt_override or creative_prompt(product, brand, "lifestyle", style, extra_prompt, background_only=True,
+                                                    people=people)
         bg, prov = generate_background(prompt, bw, bh, provider=provider, seed=seed, fallback_colors=("#e7e5e4", "#a8a29e"))
         if cutout is not None:
             bg = ops.composite_product(bg, load_image(cutout), scale=0.5, anchor=(0.5, 0.62)).convert("RGB")

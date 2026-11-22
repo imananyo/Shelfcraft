@@ -94,6 +94,8 @@ class Brand(Base, TimestampMixin, SoftDeleteMixin):
     visual_identity: Mapped[str | None] = mapped_column(Text)
     marketing_guidelines: Mapped[str | None] = mapped_column(Text)
     extra_details: Mapped[str | None] = mapped_column(Text)
+    # Structured rules for claims and visuals (see app/services/brand_rules.py); AI-drafted, user-edited.
+    rules: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
     guidelines: Mapped[list[BrandGuideline]] = relationship(back_populates="brand", cascade="all, delete-orphan")
     products: Mapped[list[Product]] = relationship(back_populates="brand")
